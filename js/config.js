@@ -11,4 +11,4 @@ export const SUPABASE_ANON_KEY = 'sb_publishable_qdBM3U2nOP5GCxRToierAg_BvOe_6Hr
 
 // OPTIONAL: only needed to import a YouTube playlist of audiobooks (see README, "YouTube playlists").
 // A free key from the Google developer console. Restrict it to your website address and to the YouTube Data API.
-export const YOUTUBE_API_KEY = 'PASTE_YOUR_YOUTUBE_API_KEY_HERE';
+export const YOUTUBE_API_KEY = 'AIzaSyD42lfM84frhJTfpGYjspxJyV2fyJVrQG0';
