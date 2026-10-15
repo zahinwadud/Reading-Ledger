@@ -521,3 +521,7 @@ body:has(dialog[open]) { overflow: hidden; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px var(--s2); }
 .two .field { margin: 0; }
 @media (max-width: 480px) { .two { grid-template-columns: 1fr; } }
+
+/* "Showing 100 of 2,443" + Show more (dashboard list) */
+.more-wrap { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: var(--s2) 0; font: 14px var(--ui); color: var(--muted); }
+.more-wrap .btn { min-height: 44px; }
