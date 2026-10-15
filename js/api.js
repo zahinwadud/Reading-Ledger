@@ -138,10 +138,23 @@ export function initTheme(button) {
 }
 
 // ---------- reading data (public) ----------
+// Supabase sends back at most 1,000 rows per request, so a bigger library has to be read in pages.
+// The order is fixed (newest first, then by id) so no row is repeated or skipped between pages.
 export async function fetchBooks() {
-  const { data, error } = await sb.from('books').select('*').order('created_at', { ascending: false });
-  if (error) throw error;
-  return data;
+  const PAGE = 1000;
+  const rows = [];
+  let total = Infinity;
+  while (rows.length < total && rows.length < 100000) {
+    const { data, error, count } = await sb.from('books').select('*', { count: 'exact' })
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
+      .range(rows.length, rows.length + PAGE - 1);
+    if (error) throw error;
+    if (!data.length) break;
+    rows.push(...data);
+    total = count == null ? (data.length < PAGE ? rows.length : Infinity) : count;
+  }
+  const seen = new Set();                                   // a book added mid-read could appear twice
+  return rows.filter((r) => (seen.has(r.id) ? false : seen.add(r.id)));
 }
 
 export function coverUrl(path) {
