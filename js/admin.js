@@ -120,11 +120,17 @@ function renderStats() {
     `<div class="stat"><b>${n}</b><span class="l-full">${full}</span><span class="l-short" aria-hidden="true">${short}</span></div>`).join('');
 }
 
+// A big library is shown 100 at a time (drawing thousands of rows would make phones slow).
+const PAGE_SIZE = 100;
+let listLimit = PAGE_SIZE;
+
 function renderRows() {
   const q = norm($('s').value);
   const st = $('sf').value;
   const list = books.filter((b) =>
     (!st || (st === 'nocover' ? !coverOf(b) : b.status === st)) && (!q || norm(b.title).includes(q) || norm(b.author).includes(q)));
+  const matches = list.length;
+  list.length = Math.min(list.length, listLimit);     // draw only the first batch
   const actions = (b) => `
         <button class="btn" type="button" data-act="edit" data-id="${esc(b.id)}">${ICON.edit}Edit</button>
         <button class="btn danger" type="button" data-act="del" data-id="${esc(b.id)}">${ICON.trash}Delete</button>`;
@@ -169,11 +175,18 @@ function renderRows() {
       </div>
     </article>`;
   }).join('');
+  // "Showing 100 of 2,443" + a button for the next 100
+  const more = matches - list.length;
+  $('more-wrap').hidden = more <= 0;
+  if (more > 0) {
+    $('more-text').textContent = `Showing ${list.length.toLocaleString()} of ${matches.toLocaleString()}`;
+    $('more-btn').textContent = `Show ${Math.min(PAGE_SIZE, more)} more`;
+  }
   $('list-msg').textContent = list.length ? '' :
     (books.length ? 'No books match your search.' : 'No books yet. Use \u201cAdd book\u201d (the + button) to add your first one.');
 }
 
-$('s').addEventListener('input', renderRows);
+$('s').addEventListener('input', () => { listLimit = PAGE_SIZE; renderRows(); });
 
 // A shorter hint on phones, so it is not cut off in the narrow search box.
 const phoneQuery = matchMedia('(max-width: 760px)');
@@ -192,7 +205,8 @@ window.addEventListener('scroll', () => {
   else if (y < lastY - 6) bar.classList.remove('away');
   lastY = y;
 }, { passive: true });
-$('sf').addEventListener('change', renderRows);
+$('sf').addEventListener('change', () => { listLimit = PAGE_SIZE; renderRows(); });
+$('more-btn').addEventListener('click', () => { listLimit += PAGE_SIZE; renderRows(); });
 
 async function onRowAction(e) {
   const btn = e.target.closest('button[data-act]');
