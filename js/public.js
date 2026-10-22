@@ -226,11 +226,12 @@ function chips(key) {
 function shelfPage(key) {
   const shelf = SHELVES.find((s) => s.key === key);
   if (!shelf) return notFound();
-  const list = books.filter(shelf.test).filter((b) =>
-    (!filters.lang || b.language === filters.lang) &&
-    (!filters.own || b.ownership === filters.own) &&
-    (!filters.fmt || b.format === filters.fmt));
-    (!filters.copies || (b.copies || []).includes(filters.copies))
+const list = books.filter(shelf.test).filter((b) =>
+  (!filters.lang || b.language === filters.lang) &&
+  (!filters.own || b.ownership === filters.own) &&
+  (!filters.fmt || b.format === filters.fmt) &&
+  (!filters.copies || (b.copies || []).includes(filters.copies))
+);
   const bar = SHELVES.map((s) =>
     `<a class="shelf-pill" href="${s.key === 'all' ? '#/all' : '#/shelf/' + s.key}" ${s.key === key ? 'aria-current="page"' : ''}>${s.label}<span class="n">${books.filter(s.test).length}</span></a>`
   ).join('');
