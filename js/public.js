@@ -366,7 +366,6 @@ function draw() {
   const page = parts[0] || 'home';
   const path = parts.slice(0, 2).join('/');
   if (path !== lastPath) { filters = { lang: '', own: '', fmt: '', copies: '' }; lastPath = path; }
-
   if (q) { setNav(''); app.innerHTML = searchPage(q); return; }
   if (page === 'book') { setNav('books'); app.innerHTML = detailPage(parts[1] || ''); return; }
   if (page === 'shelf') {
