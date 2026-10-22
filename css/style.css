@@ -376,29 +376,93 @@ dialog::backdrop { background: rgba(0, 0, 0, .55); }
 .pstat span { font: 14px var(--ui); color: var(--muted); } */
 
 /* a scrollable row of tiny covers */
-.pstats-covers { margin: 18px 0 24px; }
-.pc-strip {
-  display: flex; align-items: center;
-  gap: 6px; overflow-x: auto; padding: 2px 0;
+.pstats {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 118px;
+  gap: 10px;
+  margin: 16px 0 24px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scroll-snap-type: x proximity;
   scrollbar-width: none;
 }
-.pc-strip::-webkit-scrollbar { display: none; }
-.pc-mini {
-  flex: 0 0 46px; height: 69px; border-radius: 4px;
-  overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.18);
-  transition: transform .15s;
-}
-.pc-mini:hover { transform: translateY(-2px); }
-.pc-mini img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.pc-more {
-  flex: 0 0 46px; height: 69px; display: grid; place-items: center;
-  font-size: 0.78rem; font-weight: 600;
-  border-radius: 4px; background: rgba(128,128,128,0.15);
-}
-.pc-caption { margin: 8px 0 0; font-size: 0.85rem; opacity: 0.75; }
-.pc-caption b { font-weight: 700; opacity: 1; }
+.pstats::-webkit-scrollbar { display: none; }
 
-/* -- Stats Style -- */
+.pstat {
+  scroll-snap-align: start;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 150px;
+  padding: 10px;
+  border-radius: 10px;
+  overflow: hidden;
+  color: #fff;
+  text-decoration: none;
+  isolation: isolate;
+}
+
+/* Mosaic of covers behind the text */
+.pstat-bg {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: 1fr;
+  gap: 1px;
+  z-index: -2;
+  background: rgba(128,128,128,0.25);
+}
+.pstat-bg img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: saturate(0.9);
+}
+/* Only one cover? Let it fill the card. */
+.pstat-bg img:only-child { grid-column: span 2; grid-row: span 2; }
+
+/* Dark scrim so the number stays readable over any covers */
+.pstat::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(
+    to top,
+    rgba(0,0,0,0.72) 0%,
+    rgba(0,0,0,0.35) 45%,
+    rgba(0,0,0,0.05) 100%
+  );
+}
+
+.pstat-num {
+  font-family: 'Literata', serif;
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.pstat-lbl {
+  margin-top: 2px;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.92;
+}
+
+.pstat.big { grid-auto-columns: 150px; width: 150px; }
+.pstat.big .pstat-num { font-size: 2rem; }
+
+@media (max-width: 480px) {
+  .pstats { grid-auto-columns: 104px; }
+  .pstat { height: 138px; padding: 8px; }
+  .pstat-num { font-size: 1.4rem; }
+  .pstat.big { width: 132px; }
+}
+
+/* -- Stats Style End -- */
 @media (hover: hover) { .pstat:hover { border-color: var(--accent); transform: translateY(-2px); } }
 @media (prefers-reduced-motion: reduce) { .pstat { transition: none; } }
 
