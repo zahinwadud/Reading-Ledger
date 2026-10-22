@@ -7,7 +7,7 @@ initTheme(document.getElementById('theme'));
 
 let books = [];
 let state = configured ? 'loading' : 'setup'; // loading | ready | error | setup
-let filters = { lang: '', own: '', fmt: '' };
+let filters = { lang: '', own: '', fmt: '', copies: '' };
 let lastPath = '';
 
 // ---------- small icons (inline SVG so nothing extra is downloaded) ----------
@@ -27,6 +27,9 @@ const ICON = {
   phones: svg('<path d="M2.5 10V8a5.5 5.5 0 0 1 11 0v2"/><rect x="2" y="9.5" width="3" height="4.5" rx="1.2"/><rect x="11" y="9.5" width="3" height="4.5" rx="1.2"/>'),
 };
 
+// Does this book carry the "comics" genre? Case-insensitive, and also matches Manga / Graphic novels
+// if you'd like them grouped — change the regex to /^comics$/i to keep it strict.
+const isComics = (b) => (b.genres || []).some((g) => /comic|manga|graphic novel/i.test(g));
 // How many titles each row on the home page shows ("See all" opens the full shelf).
 const HOME_ROW_LIMIT = 5;
 
@@ -215,6 +218,7 @@ function chips(key) {
     ${group('lang', 'Language', [['', 'All'], ['English', 'English'], ['Bengali', 'Bengali']])}
     ${key === 'buy' ? '' : group('own', 'Ownership', [['', 'All'], ['owned', 'Owned'], ['buy', 'Want to Buy']])}
     ${showFormat ? group('fmt', 'Format', [['', 'All'], ['Book', 'Books'], ['Audiobook', 'Audiobooks']]) : ''}
+    ${group('copies', 'Copies', [['', 'All'], ['hardcopy', 'Hardcopy'], ['ebook', 'Ebook']])}
   </div>`;
 }
 
@@ -225,6 +229,7 @@ function shelfPage(key) {
     (!filters.lang || b.language === filters.lang) &&
     (!filters.own || b.ownership === filters.own) &&
     (!filters.fmt || b.format === filters.fmt));
+    (!filters.copies || (b.copies || []).includes(filters.copies))
   const bar = SHELVES.map((s) =>
     `<a class="shelf-pill" href="${s.key === 'all' ? '#/all' : '#/shelf/' + s.key}" ${s.key === key ? 'aria-current="page"' : ''}>${s.label}<span class="n">${books.filter(s.test).length}</span></a>`
   ).join('');
@@ -335,7 +340,7 @@ function draw() {
   const parts = location.hash.replace(/^#\/?/, '').split('/');
   const page = parts[0] || 'home';
   const path = parts.slice(0, 2).join('/');
-  if (path !== lastPath) { filters = { lang: '', own: '', fmt: '' }; lastPath = path; }
+  if (path !== lastPath) { filters = { lang: '', own: '', fmt: '', copies: '' }; lastPath = path; }
 
   if (q) { setNav(''); app.innerHTML = searchPage(q); return; }
   if (page === 'book') { setNav('books'); app.innerHTML = detailPage(parts[1] || ''); return; }
