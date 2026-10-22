@@ -216,7 +216,7 @@ a { color: var(--accent); }
 .genres { display: flex; flex-wrap: wrap; gap: var(--s1); list-style: none; margin: calc(var(--s1) * -1) 0 var(--s3); padding: 0; }
 .genres li { display: contents; }              /* li becomes invisible to layout */
 .gchip a,
-.gchip {padding: 5px 13px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); color: var(--ink); font: 13px var(--ui);}
+.gchip { padding: 5px 13px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); color: var(--ink); font: 13px var(--ui); }
 .gchip a:hover { background: var(--chip-bg-hover, #ddd); }
 .gchip.bn, .gchip.bn a { font-family: 'Noto Serif Bengali', 'Literata', Georgia, serif; }
 .detail { display: grid; grid-template-columns: 260px 1fr; gap: var(--s4); align-items: start; }
