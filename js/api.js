@@ -1,5 +1,5 @@
 // All Supabase calls live here, plus a few tiny helpers shared by both pages.
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.107.0/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 import * as CONFIG from './config.js';   // read by name, so an older config.js without the YouTube key still works
 
