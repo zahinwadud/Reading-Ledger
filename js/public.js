@@ -344,6 +344,11 @@ function draw() {
     app.innerHTML = shelfPage(parts[1]);
     return;
   }
+  if (page === 'copies') {
+    setNav('books');
+    app.innerHTML = copiesPage(parts[1]);
+    return;
+  }  
   if (page === 'all') { setNav('books'); app.innerHTML = shelfPage('all'); return; }
   if (page === 'home') { setNav('home'); app.innerHTML = homePage(); return; }
   setNav(''); app.innerHTML = notFound();
