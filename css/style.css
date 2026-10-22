@@ -370,12 +370,33 @@ dialog::backdrop { background: rgba(0, 0, 0, .55); }
 @media (prefers-reduced-motion: reduce) { .cf-card { transition: none; } }
 
 /* ---------- statistics ---------- */
-.pstats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--s2); margin-bottom: var(--s2); }
+/* .pstats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--s2); margin-bottom: var(--s2); }
 .pstat { display: block; text-align: center; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: var(--s2); text-decoration: none; color: var(--ink); transition: border-color .15s, transform .15s; }
 .pstat b { display: block; font-size: 32px; line-height: 1.1; color: var(--accent); }
-.pstat span { font: 14px var(--ui); color: var(--muted); }
+.pstat span { font: 14px var(--ui); color: var(--muted); } */
 
-
+/* a scrollable row of tiny covers */
+.pstats-covers { margin: 18px 0 24px; }
+.pc-strip {
+  display: flex; align-items: center;
+  gap: 6px; overflow-x: auto; padding: 2px 0;
+  scrollbar-width: none;
+}
+.pc-strip::-webkit-scrollbar { display: none; }
+.pc-mini {
+  flex: 0 0 46px; height: 69px; border-radius: 4px;
+  overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.18);
+  transition: transform .15s;
+}
+.pc-mini:hover { transform: translateY(-2px); }
+.pc-mini img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pc-more {
+  flex: 0 0 46px; height: 69px; display: grid; place-items: center;
+  font-size: 0.78rem; font-weight: 600;
+  border-radius: 4px; background: rgba(128,128,128,0.15);
+}
+.pc-caption { margin: 8px 0 0; font-size: 0.85rem; opacity: 0.75; }
+.pc-caption b { font-weight: 700; opacity: 1; }
 
 /* -- Stats Style -- */
 @media (hover: hover) { .pstat:hover { border-color: var(--accent); transform: translateY(-2px); } }
