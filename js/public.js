@@ -202,15 +202,38 @@ function heroMove(step) {
 // }
 // a scrollable row of tiny covers
 function statsHtml() {
-  // Pick a small sample of covers across the library
-  const sample = books.filter(b => coverOf(b)).slice(0, 7);
-  const more = Math.max(0, books.length - sample.length);
-  const strip = sample.map(b =>
-    `<a href="#/book/${esc(b.id)}" class="pc-mini"><img src="${esc(coverOf(b))}" alt="" loading="lazy"></a>`
-  ).join('');
-  return `<section class="pstats-covers" aria-label="Library at a glance">
-    <div class="pc-strip">${strip}${more ? `<span class="pc-more">+${more}</span>` : ''}</div>
-    <p class="pc-caption"><b>${books.length}</b> titles on the shelf</p>
+  const c = (f) => books.filter(f).length;
+  const pics = (f, n = 4) => books.filter((b) => f(b) && coverOf(b)).slice(0, n);
+
+  // One card: up to 4 mini covers as a mosaic, or a single cover, or a plain tint.
+  const card = (href, count, label, list, cls = '') => {
+    const covers = list.map((b) =>
+      `<img src="${esc(coverOf(b))}" alt="" loading="lazy">`).join('');
+    return `<a class="pstat${cls ? ' ' + cls : ''}" href="${href}">
+      <span class="pstat-bg" aria-hidden="true">${covers || ''}</span>
+      <span class="pstat-num">${count}</span>
+      <span class="pstat-lbl">${label}</span>
+    </a>`;
+  };
+
+  const all = books.slice(0, 4);
+  return `<section class="pstats" aria-label="Library statistics">
+    ${card('#/all', books.length, 'Total',
+        pics(() => true), 'big')}
+    ${card('#/shelf/reading', c(b => b.status === 'reading'), 'Reading',
+        pics(b => b.status === 'reading'))}
+    ${card('#/shelf/read', c(b => b.status === 'read'), 'Read',
+        pics(b => b.status === 'read'))}
+    ${card('#/shelf/want', c(b => b.status === 'want'), 'To read',
+        pics(b => b.status === 'want'))}
+    ${card('#/shelf/audio', c(b => b.format === 'Audiobook'), 'Audiobooks',
+        pics(b => b.format === 'Audiobook'))}
+    ${card('#/copies/hardcopy', c(b => (b.copies || []).includes('hardcopy')), 'Hardcopy',
+        pics(b => (b.copies || []).includes('hardcopy')))}
+    ${card('#/copies/ebook', c(b => (b.copies || []).includes('ebook')), 'Ebook',
+        pics(b => (b.copies || []).includes('ebook')))}
+    ${card('#/shelf/buy', c(b => b.ownership === 'buy'), 'Want to buy',
+        pics(b => b.ownership === 'buy'))}
   </section>`;
 }
 
