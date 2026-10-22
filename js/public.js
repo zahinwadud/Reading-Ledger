@@ -188,6 +188,7 @@ function statsHtml() {
     ['Audiobooks', count('audio'), '#/shelf/audio'],
     ['Hardcopy', copies('hardcopy'), '#/copies/hardcopy'],
     ['Ebook', copies('ebook'), '#/copies/ebook'],
+    ['Comics', books.filter(isComics).length, '#/genre/comics'],
     ['Want to buy', count('buy'), '#/shelf/buy'],
   ];
   return `<section class="pstats" aria-label="Library statistics">${
@@ -250,6 +251,22 @@ function copiesPage(kind) {
   document.title = `${label} \u2013 Reading Ledger`;
   return `<div class="wrap">
     <h1>${label}</h1>
+    <p class="lede">${list.length} ${list.length === 1 ? 'title' : 'titles'}</p>
+    ${list.length ? gridHtml(list) : '<p class="empty">Nothing here yet.</p>'}
+  </div>`;
+}
+
+// Human labels for the genre pages we link to. Anything not here falls back to the raw slug.
+const GENRE_PAGES = { comics: 'Comics', manga: 'Manga', 'graphic-novels': 'Graphic novels' };
+
+function genrePage(slug) {
+  const label = GENRE_PAGES[slug] || slug;
+  const list = slug === 'comics'
+    ? books.filter(isComics)                          // the loose grouping
+    : books.filter((b) => (b.genres || []).some((g) => g.toLowerCase() === slug.replace(/-/g, ' ')));
+  document.title = `${label} \u2013 Reading Ledger`;
+  return `<div class="wrap">
+    <h1>${esc(label)}</h1>
     <p class="lede">${list.length} ${list.length === 1 ? 'title' : 'titles'}</p>
     ${list.length ? gridHtml(list) : '<p class="empty">Nothing here yet.</p>'}
   </div>`;
@@ -353,7 +370,12 @@ function draw() {
     setNav('books');
     app.innerHTML = copiesPage(parts[1]);
     return;
-  }  
+  } 
+  if (page === 'genre') {
+    setNav('books');
+    app.innerHTML = genrePage(parts[1] || '');
+    return;
+  }
   if (page === 'all') { setNav('books'); app.innerHTML = shelfPage('all'); return; }
   if (page === 'home') { setNav('home'); app.innerHTML = homePage(); return; }
   setNav(''); app.innerHTML = notFound();
