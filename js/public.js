@@ -237,6 +237,19 @@ function shelfPage(key) {
   </div>`;
 }
 
+function copiesPage(kind) {
+  const LABELS = { hardcopy: 'Hardcopy books', ebook: 'Ebook books' };
+  const label = LABELS[kind];
+  if (!label) return notFound();
+  const list = books.filter((b) => (b.copies || []).includes(kind));
+  document.title = `${label} \u2013 Reading Ledger`;
+  return `<div class="wrap">
+    <h1>${label}</h1>
+    <p class="lede">${list.length} ${list.length === 1 ? 'title' : 'titles'}</p>
+    ${list.length ? gridHtml(list) : '<p class="empty">Nothing here yet.</p>'}
+  </div>`;
+}
+
 // "2024-03-11" -> "11 March 2024" (built by hand so time zones can never shift the day)
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 function fmtDate(iso) {
