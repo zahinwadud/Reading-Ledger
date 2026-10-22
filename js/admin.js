@@ -240,7 +240,7 @@ $('copy-picks').addEventListener('click', (e) => {
 // ---------- genres (many per book; set in the form, shown only on the book page) ----------
 const GENRES = ['Fiction', 'Non-fiction', 'Novel', 'Short stories', 'Poetry', 'Drama', 'Classic', 'Mystery & thriller',
   'Fantasy', 'Science fiction', 'Romance', 'Historical', 'Biography & memoir', 'History', 'Science', 'Philosophy',
-  'Psychology', 'Self-help', 'Business', 'Religion', 'Travel', 'Children', 'Humor', 'Essays'];
+  'Psychology', 'Self-help', 'Business', 'Religion', 'Travel', 'Children', 'Humor', 'Essays', 'Horror', 'Comics', 'Graphic novels', 'Manga'];
 let picked = [];                                   // genres chosen for the book in the form
 const sameGenre = (a, b) => a.toLowerCase() === b.toLowerCase();
 
