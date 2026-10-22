@@ -311,7 +311,13 @@ function detailPage(id) {
         <h1 class="${lc(b)}">${esc(b.title)}</h1>
         <p class="author ${lc(b)}">${esc(b.author)}</p>
         <p class="meta">${meta}</p>
-        ${(b.genres || []).length ? `<ul class="genres" aria-label="Genres">${b.genres.map((g) => `<li class="gchip${/[\u0980-\u09FF]/.test(g) ? ' bn' : ''}">${esc(g)}</li>`).join('')}</ul>` : ''}
+        ${(b.genres || []).length ? `<ul class="genres" aria-label="Genres">${b.genres.map((g) => `<li class="gchip${/[\${(b.genres || []).length ? `<ul class="genres" aria-label="Genres">${b.genres.map((g) => {
+          const slug = g.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^\w\u0980-\u09FF-]/g, '');
+          const bn = /[\u0980-\u09FF]/.test(g) ? ' bn' : '';
+          return slug
+            ? `<li class="gchip${bn}"><a href="#/genre/${esc(slug)}">${esc(g)}</a></li>`
+            : `<li class="gchip${bn}">${esc(g)}</li>`;   // unlinkable if the slug came out empty
+        }).join('')}</ul>` : ''}u0980-\u09FF]/.test(g) ? ' bn' : ''}">${esc(g)}</li>`).join('')}</ul>` : ''}
         ${b.description ? `<p class="desc ${lc(b)}">${esc(b.description)}</p>` : ''}
         <h2 class="h3">Book details</h2>
         <table class="facts"><tbody>${facts}</tbody></table>
