@@ -428,7 +428,7 @@ dialog::backdrop { background: rgba(0, 0, 0, .55); }
   right: 16px;
   width: 42px;
   height: 12px;
-  background: inherit;
+  background: color-mix(in srgb, currentColor 8%, transparent);
   border-bottom-left-radius: 6px;
   border-bottom-right-radius: 6px;
   /* A tiny cut-out effect to look like the image */
