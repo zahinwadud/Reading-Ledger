@@ -182,24 +182,38 @@ function heroMove(step) {
   heroActive = (heroActive + step + n) % n;
   placeHero();
 }
-
+// Stats design
+// function statsHtml() {
+//   const count = (key) => books.filter(SHELVES.find((s) => s.key === key).test).length;
+//   const copies = (kind) => books.filter((b) => (b.copies || []).includes(kind)).length;
+//   const items = [
+//     ['Total in shelf', books.length, '#/all'],
+//     ['Currently reading', count('reading'), '#/shelf/reading'],
+//     ['Read', count('read'), '#/shelf/read'],
+//     ['Want to read', count('want'), '#/shelf/want'],
+//     ['Audiobooks', count('audio'), '#/shelf/audio'],
+//     ['Hardcopy', copies('hardcopy'), '#/copies/hardcopy'],
+//     ['Ebook', copies('ebook'), '#/copies/ebook'],
+//     ['Comics', books.filter(isComics).length, '#/genre/comics'],
+//     ['Want to buy', count('buy'), '#/shelf/buy'],
+//   ];
+//   return `<section class="pstats" aria-label="Library statistics">${
+//     items.map(([label, n, href]) => `<a class="pstat" href="${href}"><b>${n}</b><span>${label}</span></a>`).join('')}</section>`;
+// }
+// a scrollable row of tiny covers
 function statsHtml() {
-  const count = (key) => books.filter(SHELVES.find((s) => s.key === key).test).length;
-  const copies = (kind) => books.filter((b) => (b.copies || []).includes(kind)).length;
-  const items = [
-    ['Total in shelf', books.length, '#/all'],
-    ['Currently reading', count('reading'), '#/shelf/reading'],
-    ['Read', count('read'), '#/shelf/read'],
-    ['Want to read', count('want'), '#/shelf/want'],
-    ['Audiobooks', count('audio'), '#/shelf/audio'],
-    ['Hardcopy', copies('hardcopy'), '#/copies/hardcopy'],
-    ['Ebook', copies('ebook'), '#/copies/ebook'],
-    ['Comics', books.filter(isComics).length, '#/genre/comics'],
-    ['Want to buy', count('buy'), '#/shelf/buy'],
-  ];
-  return `<section class="pstats" aria-label="Library statistics">${
-    items.map(([label, n, href]) => `<a class="pstat" href="${href}"><b>${n}</b><span>${label}</span></a>`).join('')}</section>`;
+  // Pick a small sample of covers across the library
+  const sample = books.filter(b => coverOf(b)).slice(0, 7);
+  const more = Math.max(0, books.length - sample.length);
+  const strip = sample.map(b =>
+    `<a href="#/book/${esc(b.id)}" class="pc-mini"><img src="${esc(coverOf(b))}" alt="" loading="lazy"></a>`
+  ).join('');
+  return `<section class="pstats-covers" aria-label="Library at a glance">
+    <div class="pc-strip">${strip}${more ? `<span class="pc-more">+${more}</span>` : ''}</div>
+    <p class="pc-caption"><b>${books.length}</b> titles on the shelf</p>
+  </section>`;
 }
+
 
 // ---------- pages ----------
 function homePage() {
