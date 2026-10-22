@@ -214,8 +214,20 @@ a { color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { .backbtn { transition: none; } }
 /* genres on the book page */
 .genres { display: flex; flex-wrap: wrap; gap: var(--s1); list-style: none; margin: calc(var(--s1) * -1) 0 var(--s3); padding: 0; }
-.gchip { padding: 5px 13px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); color: var(--ink); font: 13px var(--ui); }
-.gchip.bn { font-family: 'Noto Serif Bengali', 'Literata', Georgia, serif; }
+.genres li { display: contents; }              /* li becomes invisible to layout */
+.gchip a,
+.gchip {                                        /* fallback for unlinked chips */
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--chip-bg, #eee);
+  color: inherit;
+  text-decoration: none;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+.gchip a:hover { background: var(--chip-bg-hover, #ddd); }
+.gchip.bn, .gchip.bn a { font-family: 'Noto Serif Bengali', 'Literata', Georgia, serif; }
 .detail { display: grid; grid-template-columns: 260px 1fr; gap: var(--s4); align-items: start; }
 .detail-side > * + * { margin-top: var(--s2); }
 .status-pill { display: inline-block; font: 600 14px var(--ui); padding: 6px 12px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--line); margin: 0; }
