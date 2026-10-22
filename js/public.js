@@ -183,8 +183,8 @@ function statsHtml() {
     ['Read', count('read'), '#/shelf/read'],
     ['Want to read', count('want'), '#/shelf/want'],
     ['Audiobooks', count('audio'), '#/shelf/audio'],
-    ['Hardcopy', copies('hardcopy'), '#/shelf/hardcopy'],
-    ['Ebook', copies('ebook'), '#/shelf/ebook'],
+    ['Hardcopy', copies('hardcopy'), '#/copies/hardcopy'],
+    ['Ebook', copies('ebook'), '#/copies/ebook'],
     ['Want to buy', count('buy'), '#/shelf/buy'],
   ];
   return `<section class="pstats" aria-label="Library statistics">${
