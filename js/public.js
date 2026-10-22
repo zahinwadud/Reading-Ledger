@@ -260,10 +260,12 @@ function copiesPage(kind) {
 const GENRE_PAGES = { comics: 'Comics', manga: 'Manga', 'graphic-novels': 'Graphic novels' };
 
 function genrePage(slug) {
-  const label = GENRE_PAGES[slug] || slug;
+  const label = GENRE_PAGES[slug] || slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  const want = slug.replace(/-/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
   const list = slug === 'comics'
-    ? books.filter(isComics)                          // the loose grouping
-    : books.filter((b) => (b.genres || []).some((g) => g.toLowerCase() === slug.replace(/-/g, ' ')));
+    ? books.filter(isComics)
+    : books.filter((b) => (b.genres || []).some((g) =>
+        g.toLowerCase().replace(/\s+/g, ' ').trim() === want));
   document.title = `${label} \u2013 Reading Ledger`;
   return `<div class="wrap">
     <h1>${esc(label)}</h1>
