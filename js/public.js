@@ -33,6 +33,12 @@ const isComics = (b) => (b.genres || []).some((g) => /comic|manga|graphic novel/
 // How many titles each row on the home page shows ("See all" opens the full shelf).
 const HOME_ROW_LIMIT = 5;
 
+// Normalize a genre string for URL slugs and matching. Both sides must use this.
+const genreKey = (s) => String(s || '').toLowerCase().trim()
+  .replace(/&/g, ' and ')          // keep "&" meaning: "Mystery & thriller" -> "mystery and thriller"
+  .replace(/[^\w\u0980-\u09FF]+/g, '-')  // any run of non-word chars -> single hyphen
+  .replace(/^-+|-+$/g, '');         // trim leading/trailing hyphens
+
 // ---------- shelves ----------
 // Reading-status shelves hold Books. Audiobooks have their own shelf. "All" shows everything.
 const SHELVES = [
@@ -261,12 +267,12 @@ function copiesPage(kind) {
 const GENRE_PAGES = { comics: 'Comics', manga: 'Manga', 'graphic-novels': 'Graphic novels' };
 
 function genrePage(slug) {
-  const label = GENRE_PAGES[slug] || slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-  const want = slug.replace(/-/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
   const list = slug === 'comics'
     ? books.filter(isComics)
-    : books.filter((b) => (b.genres || []).some((g) =>
-        g.toLowerCase().replace(/\s+/g, ' ').trim() === want));
+    : books.filter((b) => (b.genres || []).some((g) => genreKey(g) === slug));
+  // Prefer the human-written genre from a matching book; fall back to a title-cased slug.
+  const found = list.flatMap((b) => b.genres || []).find((g) => genreKey(g) === slug);
+  const label = GENRE_PAGES[slug] || found || slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   document.title = `${label} \u2013 Reading Ledger`;
   return `<div class="wrap">
     <h1>${esc(label)}</h1>
@@ -315,7 +321,7 @@ function detailPage(id) {
         <p class="author ${lc(b)}">${esc(b.author)}</p>
         <p class="meta">${meta}</p>
         ${(b.genres || []).length ? `<ul class="genres" aria-label="Genres">${b.genres.map((g) => {
-          const slug = String(g || '').toLowerCase().trim().replace(/\s+/g, '-').replace(/[^\w\u0980-\u09FF-]/g, '');
+          const slug = genreKey(g);
           const bn = /[\u0980-\u09FF]/.test(g) ? ' bn' : '';
           return slug
             ? `<li class="gchip${bn}"><a href="#/genre/${esc(slug)}">${esc(g)}</a></li>`
