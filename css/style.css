@@ -406,7 +406,7 @@ dialog::backdrop { background: rgba(0, 0, 0, .55); }
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  height: 150px;
+  height: 175px;
   background: var(--folder-bg, #e2e8f0); /* Soft gray/blue */
   border-radius: 10px;
   padding: 16px;
