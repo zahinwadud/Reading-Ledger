@@ -279,6 +279,15 @@ const list = books.filter(shelf.test).filter((b) =>
   (!filters.fmt || b.format === filters.fmt) &&
   (!filters.copies || (b.copies || []).includes(filters.copies))
 );
+    // READ FULL PAGE DESCENDING ORDER 
+  if (key === 'read') {
+    list.sort((a, b) => {
+      const dateA = new Date(a.finished_at || a.created_at || 0);
+      const dateB = new Date(b.finished_at || b.created_at || 0);
+      return dateB - dateA;
+    });
+  }
+  // ... rest of the function
   const bar = SHELVES.map((s) =>
     `<a class="shelf-pill" href="${s.key === 'all' ? '#/all' : '#/shelf/' + s.key}" ${s.key === key ? 'aria-current="page"' : ''}>${s.label}<span class="n">${books.filter(s.test).length}</span></a>`
   ).join('');
