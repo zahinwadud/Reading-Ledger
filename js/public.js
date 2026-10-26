@@ -235,6 +235,17 @@ function statsHtml() {
 function homePage() {
   const rows = SHELVES.filter((s) => s.key !== 'all').map((s) => {
     const all = books.filter(s.test);
+      // --- SORT READ SHELF BLOCK DESCENDING ---
+      if (s.key === 'read') {
+      // Sort by finished_at (newest first). 
+      // If finished_at is missing, fall back to created_at.
+      all.sort((a, b) => {
+        const dateA = new Date(a.finished_at || a.created_at || 0);
+        const dateB = new Date(b.finished_at || b.created_at || 0);
+        return dateB - dateA;
+      });
+    }
+    // ----------------------
     const list = all.slice(0, HOME_ROW_LIMIT);
     return `<section class="shelf-row" aria-label="${esc(s.label)}">
       <div class="row-head"><h2>${s.label}</h2><a href="#/shelf/${s.key}">See all (${all.length})</a></div>
