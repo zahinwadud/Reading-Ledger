@@ -350,7 +350,26 @@ drop.addEventListener('click', (e) => { if (!e.target.closest('#remove-cover')) 
 drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); } });
 ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
 ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
-drop.addEventListener('drop', (e) => handleFile(e.dataTransfer.files[0]));
+
+// -----
+drop.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  drop.classList.remove('over');
+  
+  // 1. Check if a real file was dropped (from desktop)
+  if (e.dataTransfer.files.length > 0) {
+    handleFile(e.dataTransfer.files[0]);
+    return;
+  }
+  
+  // 2. Check if a link/URL was dropped (from another browser tab)
+  const url = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+  if (url && /^https?:\/\//i.test(url)) {
+    await handleImageUrl(url);
+  }
+});
+// -----
+
 fileInput.addEventListener('change', () => { handleFile(fileInput.files[0]); fileInput.value = ''; });
 $('remove-cover').addEventListener('click', () => { newBlob = null; removeFlag = true; setPreview(''); });
 
