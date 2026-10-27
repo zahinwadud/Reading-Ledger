@@ -236,15 +236,24 @@ function homePage() {
   const rows = SHELVES.filter((s) => s.key !== 'all').map((s) => {
     const all = books.filter(s.test);
       // --- SORT READ SHELF BLOCK DESCENDING ---
-      if (s.key === 'read') {
-      // Sort by finished_at (newest first). 
-      // If finished_at is missing, fall back to created_at.
-      all.sort((a, b) => {
-        const dateA = new Date(a.finished_at || a.created_at || 0);
-        const dateB = new Date(b.finished_at || b.created_at || 0);
-        return dateB - dateA;
-      });
-    }
+all.sort((a, b) => {
+  // 1. Check if they have a finish date (1 = has date, 0 = no date)
+  const hasA = a.finished_at ? 1 : 0;
+  const hasB = b.finished_at ? 1 : 0;
+
+  // 2. Push books without a finish date to the bottom
+  if (hasA !== hasB) {
+    return hasB - hasA; 
+  }
+
+  // 3. If both have a finish date, sort newest first
+  if (hasA === 1 && hasB === 1) {
+    return new Date(b.finished_at) - new Date(a.finished_at);
+  }
+
+  // 4. If neither has a finish date, fallback to newest added first
+  return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+});
     // ----------------------
     const list = all.slice(0, HOME_ROW_LIMIT);
     return `<section class="shelf-row" aria-label="${esc(s.label)}">
@@ -282,9 +291,11 @@ const list = books.filter(shelf.test).filter((b) =>
     // READ FULL PAGE DESCENDING ORDER 
   if (key === 'read') {
     list.sort((a, b) => {
-      const dateA = new Date(a.finished_at || a.created_at || 0);
-      const dateB = new Date(b.finished_at || b.created_at || 0);
-      return dateB - dateA;
+      const hasA = a.finished_at ? 1 : 0;
+      const hasB = b.finished_at ? 1 : 0;
+      if (hasA !== hasB) return hasB - hasA;
+      if (hasA === 1 && hasB === 1) return new Date(b.finished_at) - new Date(a.finished_at);
+      return new Date(b.created_at || 0) - new Date(a.created_at || 0);
     });
   }
   // ... rest of the function
