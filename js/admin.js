@@ -388,6 +388,38 @@ async function handleFile(file) {
   }
 }
 
+async function handleImageUrl(url) {
+  setErr('cover', '');
+  const dropText = $('drop-text');
+  const originalText = dropText.textContent;
+  dropText.textContent = 'Fetching image from web…';
+  
+  try {
+    // Fetch the image from the external URL
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Failed to fetch');
+    const blob = await res.blob();
+    
+    if (!blob.type.startsWith('image/')) {
+      throw new Error('That link is not an image.');
+    }
+    
+    // Create a File object so we can reuse the existing handleFile logic
+    const file = new File([blob], 'cover.jpg', { type: blob.type });
+    
+    // Reuse your existing image processing (resizing, webp conversion, preview)
+    newBlob = await processImage(file);
+    removeFlag = false;
+    setPreview(URL.createObjectURL(newBlob));
+    
+  } catch (err) {
+    console.error(err);
+    setErr('cover', 'Could not load the image from that link. (The site might block external access).');
+  } finally {
+    dropText.textContent = originalText;
+  }
+}
+
 async function processImage(file) {
   let img;
   try { img = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
