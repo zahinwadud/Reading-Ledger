@@ -420,6 +420,14 @@ async function handleImageUrl(url) {
   }
 }
 
+drop.addEventListener('paste', async (e) => {
+  const text = e.clipboardData.getData('text');
+  if (text && /^https?:\/\//i.test(text)) {
+    e.preventDefault();
+    await handleImageUrl(text);
+  }
+});
+
 async function processImage(file) {
   let img;
   try { img = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
