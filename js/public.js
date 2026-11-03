@@ -310,11 +310,6 @@ const list = books.filter(shelf.test).filter((b) =>
   }
   // ... rest of the function
 
-  // --- FOR AUDIOBOOKS BLOCK ---
-  else if (key === 'audio') {
-    list.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-  }
-  // ----------------------
   const bar = SHELVES.map((s) =>
     `<a class="shelf-pill" href="${s.key === 'all' ? '#/all' : '#/shelf/' + s.key}" ${s.key === key ? 'aria-current="page"' : ''}>${s.label}<span class="n">${books.filter(s.test).length}</span></a>`
   ).join('');
