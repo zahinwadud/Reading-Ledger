@@ -255,6 +255,11 @@ all.sort((a, b) => {
   return new Date(b.created_at || 0) - new Date(a.created_at || 0);
 });
     // ----------------------
+        // --- FOR AUDIOBOOKS BLOCK ---
+    else if (s.key === 'audio') {
+      all.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+    }
+    // ----------------------
     const list = all.slice(0, HOME_ROW_LIMIT);
     return `<section class="shelf-row" aria-label="${esc(s.label)}">
       <div class="row-head"><h2>${s.label}</h2><a href="#/shelf/${s.key}">See all (${all.length})</a></div>
