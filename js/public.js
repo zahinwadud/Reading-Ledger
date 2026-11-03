@@ -254,6 +254,7 @@ all.sort((a, b) => {
   // 4. If neither has a finish date, fallback to newest added first
   return new Date(b.created_at || 0) - new Date(a.created_at || 0);
 });
+  }
     // ----------------------
         // --- FOR AUDIOBOOKS BLOCK ---
     else if (s.key === 'audio') {
