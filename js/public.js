@@ -235,38 +235,42 @@ function statsHtml() {
 function homePage() {
   const rows = SHELVES.filter((s) => s.key !== 'all').map((s) => {
     const all = books.filter(s.test);
-      // --- SORT READ SHELF BLOCK DESCENDING ---
-all.sort((a, b) => {
-  // 1. Check if they have a finish date (1 = has date, 0 = no date)
-  const hasA = a.finished_at ? 1 : 0;
-  const hasB = b.finished_at ? 1 : 0;
+    
+    // --- SORT READ SHELF BLOCK DESCENDING ---
+    if (s.key === 'read') {
+      all.sort((a, b) => {
+        // 1. Check if they have a finish date (1 = has date, 0 = no date)
+        const hasA = a.finished_at ? 1 : 0;
+        const hasB = b.finished_at ? 1 : 0;
 
-  // 2. Push books without a finish date to the bottom
-  if (hasA !== hasB) {
-    return hasB - hasA; 
-  }
+        // 2. Push books without a finish date to the bottom
+        if (hasA !== hasB) {
+          return hasB - hasA; 
+        }
 
-  // 3. If both have a finish date, sort newest first
-  if (hasA === 1 && hasB === 1) {
-    return new Date(b.finished_at) - new Date(a.finished_at);
-  }
+        // 3. If both have a finish date, sort newest first
+        if (hasA === 1 && hasB === 1) {
+          return new Date(b.finished_at) - new Date(a.finished_at);
+        }
 
-  // 4. If neither has a finish date, fallback to newest added first
-  return new Date(b.created_at || 0) - new Date(a.created_at || 0);
-});
-  }
-    // ----------------------
-        // --- FOR AUDIOBOOKS BLOCK ---
+        // 4. If neither has a finish date, fallback to newest added first
+        return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+      });
+    }
+    // --- FOR AUDIOBOOKS BLOCK ---
     else if (s.key === 'audio') {
       all.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
     }
     // ----------------------
+
     const list = all.slice(0, HOME_ROW_LIMIT);
     return `<section class="shelf-row" aria-label="${esc(s.label)}">
       <div class="row-head"><h2>${s.label}</h2><a href="#/shelf/${s.key}">See all (${all.length})</a></div>
       ${list.length ? `<div class="row">${list.map(homeCard).join('')}</div>` : '<p class="empty">Nothing on this shelf yet.</p>'}
     </section>`;
   }).join('');
+  
+  // ... (the rest of your homePage function, like document.title = ... and the return statement)
   document.title = 'Reading Ledger';
   return heroHtml() + `<div class="wrap">${statsHtml()}${rows}</div>`;
 }
