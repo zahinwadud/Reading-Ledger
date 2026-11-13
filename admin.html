@@ -104,6 +104,7 @@
         <option value="language">Language</option>
         <option value="copies">Copies I have</option>
         <option value="series">Series</option>
+        <option value="arc">Story arc</option>
       </select>
       <span id="bulk-value"></span>
       <button class="btn primary" id="bulk-apply" type="button" disabled>Apply</button>
@@ -155,6 +156,9 @@
 
       <div class="field" id="g-series" hidden><label for="f-series">Series</label><input id="f-series" type="text" list="series-list" autocomplete="off" placeholder="e.g. তিন গোয়েন্দা"><datalist id="series-list"></datalist></div>
       <div class="field" id="g-series-no" hidden><label for="f-series-no">Number in the series</label><input id="f-series-no" type="text" inputmode="decimal" placeholder="e.g. 4"><p class="err" id="e-series-no" role="alert"></p></div>
+
+      <div class="field" id="g-arc" hidden><label for="f-arc">Story arc <span class="opt">(comics)</span></label><input id="f-arc" type="text" list="arc-list" autocomplete="off" placeholder="e.g. Hush"><datalist id="arc-list"></datalist></div>
+      <div class="field" id="g-arc-no" hidden><label for="f-arc-no">Place in the story arc</label><input id="f-arc-no" type="text" inputmode="decimal" placeholder="e.g. 1"><p class="err" id="e-arc-no" role="alert"></p></div>
 
       <div class="field full" id="g-finished" hidden><label for="f-finished">Date finished</label><input id="f-finished" type="date"></div>
 

@@ -150,8 +150,22 @@ Your dashboard can bring in comic issues with their covers, writers and summarie
 3. Search for a series (*Batman*) or a story arc (*Batman: Hush*). For a long series, give the issue numbers you want (for example 608 to 619).
 4. Check the list: set the series name, tick the issues, and use **I have read up to** to mark the ones you have finished. Then press **Import**.
 
+Comics have three levels, and the import keeps them apart:
+
+- the **series** an issue was published in (*Batman*) and its **number** there (#608);
+- the **story arc** it belongs to, if any (*Hush*). An arc can run through more than one series.
+
+Pick a story arc and each issue keeps its own series, with the arc filled in. Pick a series and the import can read each issue's arc from Comic Vine. On the site, a series page groups its issues by arc, and each arc has its own page with a progress bar.
+
+Story arcs need two more columns, a one-time step. In Supabase open **SQL Editor → New query**, run these lines, then reload the dashboard (Tools → Series shows them with a copy button):
+
+```sql
+alter table public.books add column if not exists arc text;
+alter table public.books add column if not exists arc_no numeric;
+```
+
 Good to know:
-- Issues you already have are not added twice. If one has no cover yet, the import gives it its cover and changes nothing else.
+- Issues you already have are not added twice. The import only fills in what they lack (cover, story arc) and changes nothing else.
 - New issues get the genre *Comics*, so they appear in the Comics section, and they count in the shelves and totals like any other title.
 - Covers are saved as links to Comic Vine's pictures, so they use none of your storage.
 - Comic Vine asks for about one request a second, so looking up the writers takes about a second per issue.
