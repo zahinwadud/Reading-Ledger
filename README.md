@@ -95,6 +95,42 @@ The site can be installed on a phone or computer like an app. It gets its own ic
 
 The installed app is the same site and the same database, so anything you add in the dashboard shows up in it. It updates by itself when you publish a change. The files behind this are `manifest.webmanifest` (name, colours, icons), `sw.js` (the offline copy) and the `icons` folder; upload them with the rest.
 
+## The four sections
+
+- **Home** and **Books** are the shelves. On a phone, the filters sit behind one **Filters** button.
+- **Comics** shows every title with the genre *Comics*, *Manga* or *Graphic novels*, grouped by series, with how far you are through each one. Comics still count in the shelves and totals; this is only another way to look at them.
+- **Stats** shows what was finished each year and month, the split between books, comics and audiobooks, and a yearly goal. Set the goal in the dashboard under **Tools → Reading goal**; it then shows on every device. (That tool shows a one-time database step the first time.)
+- **Open the app on this page** (at the bottom of the Hardcopy, Ebook and Want to Buy pages) makes that page the opening screen on that one device.
+
+## Working in the dashboard
+
+- **Edit from the site:** while you are signed in, every book page on the public site shows an **Edit** button that opens that book's form. Saving or closing takes you back to the book.
+- **Count cards** at the top filter the list when clicked. Under the search box there are more filters (format, language, what is missing) and the sort order.
+- **Reading status** can be changed right in the list. Choosing *Read* fills in today as the finish date if the book has none.
+- **Change many books at once:** tick books (or tick the box in the table heading for all of them), then use the bar at the bottom to add or remove a genre, or set status, ownership, language, copies or series.
+- **Delete** is inside the book's form, at the bottom left.
+
+### Tools
+
+The **Tools** button holds five helpers. Each one shows what it found and changes nothing until you press its button.
+
+- **Download a backup:** saves every book to a file. Do this before big changes.
+- **Find duplicates:** lists titles that appear more than once; you choose the copy to keep.
+- **Tidy author names:** suggests authors written in more than one way (for example in Bengali and in English letters) and lets you pick one spelling.
+- **Series:** lifts series names out of titles such as "ছায়াশ্বাপদ (তিন গোয়েন্দা, #৪)". It needs a one-time database step, shown below.
+- **Find covers:** looks books up on Open Library by title and author and shows covers to choose from.
+
+### Turning on series (one time)
+
+In Supabase open **SQL Editor → New query**, paste these two lines and click **Run**:
+
+```sql
+alter table public.books add column if not exists series text;
+alter table public.books add column if not exists series_no numeric;
+```
+
+Reload the dashboard. The book form now has a Series field, and the public site shows a page for each series.
+
 ## Importing your Goodreads list (optional)
 
 1. On a computer, open Goodreads, go to **My Books**, choose **Import and export** under *Tools*, and click **Export Library**. Download the CSV file. (The Goodreads phone app cannot export.)
@@ -104,6 +140,21 @@ The installed app is the same site and the same database, so anything you add in
 Good to know:
 - **Covers:** Goodreads does not put covers in the export, and it has no public API any more. The import can look covers up by ISBN on [Open Library](https://openlibrary.org) and saves a *link* to each one, so it uses none of your free storage. Many books (especially Bengali ones) won't be found. Choose **No cover** in the dashboard filter to find them and upload your own; an uploaded cover always replaces the link.
 - **Already have the books?** Titles that match one already in your shelf are unticked automatically.
+
+## Importing comics from Comic Vine (optional)
+
+Your dashboard can bring in comic issues with their covers, writers and summaries from [Comic Vine](https://comicvine.gamespot.com), a large comics database.
+
+1. Sign in at comicvine.gamespot.com (free), open <https://comicvine.gamespot.com/api> and copy your API key.
+2. In the dashboard click **Import → Comics** and paste the key. It is kept in that browser only. **Do not put it in `js/config.js`**: that file is public on GitHub.
+3. Search for a series (*Batman*) or a story arc (*Batman: Hush*). For a long series, give the issue numbers you want (for example 608 to 619).
+4. Check the list: set the series name, tick the issues, and use **I have read up to** to mark the ones you have finished. Then press **Import**.
+
+Good to know:
+- Issues you already have are not added twice. If one has no cover yet, the import gives it its cover and changes nothing else.
+- New issues get the genre *Comics*, so they appear in the Comics section, and they count in the shelves and totals like any other title.
+- Covers are saved as links to Comic Vine's pictures, so they use none of your storage.
+- Comic Vine asks for about one request a second, so looking up the writers takes about a second per issue.
 
 ## Importing a YouTube playlist of audiobooks (optional)
 
