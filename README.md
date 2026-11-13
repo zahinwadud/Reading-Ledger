@@ -65,7 +65,7 @@ export const SUPABASE_ANON_KEY = 'sb_publishable_...';
 
 **7. Upload the files**
 1. On the new repository page click **uploading an existing file** (or **Add file → Upload files**).
-2. Open the unzipped folder on your computer, select **everything inside it** (`index.html`, `admin.html`, the `css`, `js` and `supabase` folders, `README.md`, `.nojekyll`) and drag it into the browser window. Upload the *contents*, not the zip itself.
+2. Open the unzipped folder on your computer, select **everything inside it** (`index.html`, `admin.html`, the `css`, `js`, `icons` and `supabase` folders, `sw.js`, `manifest.webmanifest`, `README.md`) and drag it into the browser window. Upload the *contents*, not the zip itself.
 3. Wait for the upload to finish, then click **Commit changes**.
 4. Check that `index.html` and the `js` folder appear in the file list. (If `.nojekyll` didn't upload because it is hidden on your computer, that's fine.)
 
@@ -84,6 +84,16 @@ export const SUPABASE_ANON_KEY = 'sb_publishable_...';
 That's it. Your site is live.
 
 ---
+
+## Install it as an app (optional)
+
+The site can be installed on a phone or computer like an app. It gets its own icon, opens full-screen, and the shelf still opens with no connection (it shows the copy saved on your last visit).
+
+- **Android (Chrome):** open the site, tap the **⋮** menu, then **Add to Home screen → Install**.
+- **iPhone (Safari):** tap **Share → Add to Home Screen**.
+- **Computer (Chrome or Edge):** click the install icon at the right end of the address bar.
+
+The installed app is the same site and the same database, so anything you add in the dashboard shows up in it. It updates by itself when you publish a change. The files behind this are `manifest.webmanifest` (name, colours, icons), `sw.js` (the offline copy) and the `icons` folder; upload them with the rest.
 
 ## Importing your Goodreads list (optional)
 
@@ -134,5 +144,6 @@ Then click **Import → YouTube playlist** and paste the playlist link.
 | "This account is not allowed to change books" | The User UID in `schema.sql` doesn't match the account you log in with. In the SQL Editor run `create or replace function public.is_owner() returns boolean language sql stable as $$ select auth.uid()::text = 'YOUR-UID' $$;` with the right UID. |
 | Cover upload fails | Make sure step 3 ran without errors (it creates the `covers` bucket). |
 | Site shows old content after an edit | Wait a minute and hard-refresh (Ctrl+Shift+R, or Cmd+Shift+R on a Mac). |
+| Installed app shows old content | Open it while online and pull down to refresh (or close and reopen it). If you edited `sw.js`, raise its `VERSION` number. |
 | Playlist import says to add a key | Follow the YouTube steps above, and make sure the key is restricted to your site address. |
 | Playlist import says the key is restricted to other websites | In the Google console, add your exact site address (`https://YOUR-NAME.github.io/*`) to the key's allowed websites. |
