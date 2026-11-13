@@ -43,6 +43,8 @@ create table if not exists public.books (
   isbn         text,                              -- filled by the Goodreads import
   cover_url    text,                              -- cover link found by the import (Open Library); an uploaded cover wins
   cover_path   text,                              -- file name inside the "covers" bucket
+  series       text,                              -- the series this book belongs to, e.g. 'Feluda'
+  series_no    numeric,                           -- its number in the series (4, or 4.5)
   created_at   timestamptz not null default now(),
   constraint youtube_only_for_audiobooks
     check (youtube_url is null or format = 'Audiobook')
@@ -54,6 +56,8 @@ alter table public.books add column if not exists copies text[] not null default
 alter table public.books add column if not exists finished_at date;
 alter table public.books add column if not exists isbn text;
 alter table public.books add column if not exists cover_url text;
+alter table public.books add column if not exists series text;
+alter table public.books add column if not exists series_no numeric;
 do $$ begin
   if not exists (select 1 from pg_constraint where conname = 'books_copies_valid') then
     alter table public.books add constraint books_copies_valid check (copies <@ array['hardcopy', 'ebook']::text[]);
@@ -102,3 +106,19 @@ create policy "Anyone can view covers"  on storage.objects for select using (buc
 create policy "Owner can upload covers" on storage.objects for insert with check (bucket_id = 'covers' and public.is_owner());
 create policy "Owner can update covers" on storage.objects for update using (bucket_id = 'covers' and public.is_owner());
 create policy "Owner can delete covers" on storage.objects for delete using (bucket_id = 'covers' and public.is_owner());
+
+-- ---------------------------------------------------------------------
+-- 5. Settings shared by every device (for example the yearly reading goal)
+-- ---------------------------------------------------------------------
+create table if not exists public.settings (
+  key text primary key,
+  value jsonb not null,
+  updated_at timestamptz not null default now()
+);
+alter table public.settings enable row level security;
+drop policy if exists "Anyone can read settings" on public.settings;
+drop policy if exists "Owner can change settings" on public.settings;
+create policy "Anyone can read settings" on public.settings for select using (true);
+create policy "Owner can change settings" on public.settings for all using (public.is_owner()) with check (public.is_owner());
+grant select on public.settings to anon, authenticated;
+grant insert, update, delete on public.settings to authenticated;
