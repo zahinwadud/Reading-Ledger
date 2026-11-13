@@ -45,6 +45,8 @@ create table if not exists public.books (
   cover_path   text,                              -- file name inside the "covers" bucket
   series       text,                              -- the series this book belongs to, e.g. 'Feluda'
   series_no    numeric,                           -- its number in the series (4, or 4.5)
+  arc          text,                              -- comics: the story arc this issue is part of, e.g. 'Hush'
+  arc_no       numeric,                           -- its place in that story arc (1, 2, 3 ...)
   created_at   timestamptz not null default now(),
   constraint youtube_only_for_audiobooks
     check (youtube_url is null or format = 'Audiobook')
@@ -58,6 +60,8 @@ alter table public.books add column if not exists isbn text;
 alter table public.books add column if not exists cover_url text;
 alter table public.books add column if not exists series text;
 alter table public.books add column if not exists series_no numeric;
+alter table public.books add column if not exists arc text;
+alter table public.books add column if not exists arc_no numeric;
 do $$ begin
   if not exists (select 1 from pg_constraint where conname = 'books_copies_valid') then
     alter table public.books add constraint books_copies_valid check (copies <@ array['hardcopy', 'ebook']::text[]);
