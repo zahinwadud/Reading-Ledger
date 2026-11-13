@@ -1,5 +1,5 @@
 // Public site: home rows, shelf pages, book detail, live search.
-import { configured, fetchBooks, coverOf, ytThumb, esc, norm, initTheme, STATUS, OWN } from './api.js';
+import { configured, fetchShelf, readShelfCache, writeShelfCache, coverOf, ytThumb, esc, norm, initTheme, STATUS, OWN } from './core.js';
 
 const app = document.getElementById('app');
 const qEl = document.getElementById('q');
@@ -9,6 +9,7 @@ let books = [];
 let state = configured ? 'loading' : 'setup'; // loading | ready | error | setup
 let filters = { lang: '', own: '', fmt: '', copies: '' };
 let lastPath = '';
+let offline = false;      // true while we are showing the saved copy because the fresh one could not load
 
 // ---------- small icons (inline SVG so nothing extra is downloaded) ----------
 const svg = (inner) =>
@@ -55,6 +56,19 @@ const lc = (b) => (b.language === 'Bengali' ? 'bn' : '');
 
 // Books show an uploaded 2:3 cover. Audiobooks show the YouTube thumbnail in a 16:9 frame
 // (or an uploaded image, cropped to widescreen, if there is no YouTube link).
+// No picture for this title? Draw a cover from its title and author. The colour comes from the author's
+// name, so one author's books share a colour family; the title shifts the shade a little.
+function hash(text) {
+  let h = 0;
+  for (const ch of String(text || '')) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+  return h;
+}
+function genCover(b) {
+  const hue = (hash(norm(b.author)) % 360 + (hash(norm(b.title)) % 25) - 12 + 360) % 360;
+  const shade = hash(norm(b.title)) % 3;
+  return `<div class="gencover${b.format === 'Audiobook' ? ' wide' : ''}" data-s="${shade}" style="--h:${hue}" aria-hidden="true"><span class="gc-t ${lc(b)}">${esc(b.title)}</span><span class="gc-a ${lc(b)}">${esc(b.author)}</span></div>`;
+}
+
 function coverHtml(b, eager) {
   const audio = b.format === 'Audiobook';
   const yurl = audio ? ytThumb(b.youtube_url, eager ? 'maxresdefault' : 'hqdefault') : '';
@@ -63,11 +77,11 @@ function coverHtml(b, eager) {
   const dims = audio ? 'width="320" height="180"' : 'width="200" height="300"';
   const img = url
     ? `<img src="${esc(url)}" ${fallback ? `data-fb="${esc(fallback)}"` : ''} alt="${audio ? 'Thumbnail' : 'Cover'} of ${esc(b.title)}" ${dims} ${eager ? '' : 'loading="lazy"'}>`
-    : `<div class="nocover">${audio ? 'No thumbnail' : 'No cover'}</div>`;
+    : genCover(b);
   const play = yurl ? `<span class="play" aria-hidden="true">${ICON.play}</span>` : '';
   const hp = audio
     ? `<span class="hp" role="img" aria-label="Audiobook" title="Audiobook">${ICON.phones}</span>` : '';
-  return `<div class="cover${audio ? ' wide' : ''}">${img}${play}${hp}</div>`;
+  return `<div class="cover${audio ? ' wide' : ''}" data-b="${esc(b.id)}">${img}${play}${hp}</div>`;
 }
 
 // Reading status pill: Currently Reading / Read / Want to Read.
@@ -105,16 +119,65 @@ const homeCard = (b) => cardBase(b, false);
 const stateBox = (html) => `<div class="wrap"><div class="state">${html}</div></div>`;
 const notFound = () => stateBox('<p>We couldn\u2019t find that page.</p><a class="btn primary" href="#/">Back to the shelf</a>');
 
+// ---------- grids are drawn a batch at a time ----------
+// A shelf can hold thousands of titles. Drawing them all at once makes the page slow, so each grid
+// starts with one batch and adds the next one as you scroll near its end (or press "Show more").
+const BATCH = 60;
+let grids = {};     // the full list behind each grid on the page being shown: { bk: {...}, au: {...} }
+let shown = {};     // how many cards each grid shows so far (kept when only the data refreshes)
+
+function gridBlock(key, list, wide, cardFn, heading = '') {
+  grids[key] = { list, cardFn };
+  const n = shown[key] = Math.min(list.length, Math.max(shown[key] || 0, BATCH));
+  const more = n < list.length
+    ? `<div class="more" data-more="${key}"><button class="btn" type="button">Show more <small>${n} of ${list.length}</small></button></div>` : '';
+  return `${heading}<div class="grid${wide ? ' wide' : ''}" data-grid="${key}">${list.slice(0, n).map(cardFn).join('')}</div>${more}`;
+}
+
 // Books (portrait covers) and audiobooks (wide thumbnails) never share one grid.
+// When a page has both, the audiobooks follow once every book is on screen.
 function gridHtml(list, withTags = false) {
   const cardFn = withTags ? (b) => cardBase(b, true) : card;
   const bk = list.filter((b) => b.format !== 'Audiobook');
   const au = list.filter((b) => b.format === 'Audiobook');
-  const grid = (l, wide) => `<div class="grid${wide ? ' wide' : ''}">${l.map(cardFn).join('')}</div>`;
   if (bk.length && au.length) {
-    return `<h2 class="sec-h">Books <small>${bk.length}</small></h2>${grid(bk)}<h2 class="sec-h">Audiobooks <small>${au.length}</small></h2>${grid(au, true)}`;
+    const audio = () => gridBlock('au', au, true, cardFn, `<h2 class="sec-h">Audiobooks <small>${au.length}</small></h2>`);
+    const books = gridBlock('bk', bk, false, cardFn, `<h2 class="sec-h">Books <small>${bk.length}</small> <a class="sec-jump" href="#" data-jump="au">Audiobooks <small>${au.length}</small> \u2193</a></h2>`);
+    grids.bk.then = audio;
+    return books + (shown.bk >= bk.length ? audio() : '');
   }
-  return grid(list, au.length > 0);
+  return gridBlock(au.length ? 'au' : 'bk', list, au.length > 0, cardFn);
+}
+
+// Add the next batch to a grid (all = every remaining card).
+function showMore(key, all = false) {
+  const g = grids[key];
+  const grid = document.querySelector(`[data-grid="${key}"]`);
+  const more = document.querySelector(`[data-more="${key}"]`);
+  if (!g || !grid) return;
+  const from = shown[key];
+  const to = shown[key] = all ? g.list.length : Math.min(g.list.length, from + BATCH);
+  grid.insertAdjacentHTML('beforeend', g.list.slice(from, to).map(g.cardFn).join(''));
+  if (more) {
+    if (to >= g.list.length) {
+      more.remove();
+      if (g.then) { grid.insertAdjacentHTML('afterend', g.then()); g.then = null; watchMore(); }
+    } else {
+      more.querySelector('small').textContent = `${to} of ${g.list.length}`;
+      moreWatcher && moreWatcher.unobserve(more); moreWatcher && moreWatcher.observe(more);   // still in view? load again
+    }
+  }
+}
+
+const moreWatcher = 'IntersectionObserver' in window
+  ? new IntersectionObserver((entries) => {
+      entries.forEach((en) => { if (en.isIntersecting) showMore(en.target.dataset.more); });
+    }, { rootMargin: '900px 0px' })
+  : null;
+function watchMore() {
+  if (!moreWatcher) return;
+  moreWatcher.disconnect();
+  document.querySelectorAll('[data-more]').forEach((el) => moreWatcher.observe(el));
 }
 
 // ---------- hero: recently finished books in a coverflow ----------
@@ -145,8 +208,8 @@ function heroHtml() {
   const cards = items.map((b, i) => {
     const url = coverOf(b);
     const o = heroOffset(i, n);
-    return `<a class="cf-card" href="#/book/${esc(b.id)}" data-i="${i}" data-o="${o}" ${o === 0 ? '' : 'tabindex="-1"'} aria-label="${esc(b.title)}, ${esc(b.author)}">${
-      url ? `<img src="${esc(url)}" alt="" width="230" height="345" draggable="false">` : '<div class="nocover">No cover</div>'}</a>`;
+    return `<a class="cf-card" href="#/book/${esc(b.id)}" data-b="${esc(b.id)}" data-i="${i}" data-o="${o}" ${o === 0 ? '' : 'tabindex="-1"'} aria-label="${esc(b.title)}, ${esc(b.author)}">${
+      url ? `<img src="${esc(url)}" alt="" width="230" height="345" draggable="false">` : genCover(b)}</a>`;
   }).join('');
   const buttons = n > 1
     ? `<div class="cf-btns"><button class="cf-btn" type="button" data-cf="prev" aria-label="Previous book">${ICON.left}</button><button class="cf-btn next" type="button" data-cf="next" aria-label="Next book">${ICON.right}</button></div>` : '';
@@ -203,18 +266,20 @@ function heroMove(step) {
 // a scrollable row of tiny covers
 function statsHtml() {
   const c = (f) => books.filter(f).length;
-  const isComics = (b) => (b.genres || []).some((g) => /comic|manga|graphic novel/i.test(g));
+  // The shelf tiles use the same rules as the shelves they open, so the numbers always agree.
+  // (Reading / Read / Want to read count books; audiobooks have their own tile.)
+  const shelf = (key) => c(SHELVES.find((s) => s.key === key).test);
 
   const items = [
     ['Total in shelf', books.length, '#/all'],
-    ['Currently reading', c(b => b.status === 'reading'), '#/shelf/reading'],
-    ['Read', c(b => b.status === 'read'), '#/shelf/read'],
-    ['Want to read', c(b => b.status === 'want'), '#/shelf/want'],
-    ['Audiobooks', c(b => b.format === 'Audiobook'), '#/shelf/audio'],
+    ['Currently reading', shelf('reading'), '#/shelf/reading'],
+    ['Read', shelf('read'), '#/shelf/read'],
+    ['Want to read', shelf('want'), '#/shelf/want'],
+    ['Audiobooks', shelf('audio'), '#/shelf/audio'],
     ['Hardcopy', c(b => (b.copies || []).includes('hardcopy')), '#/copies/hardcopy'],
     ['Ebook', c(b => (b.copies || []).includes('ebook')), '#/copies/ebook'],
     ['Comics', c(isComics), '#/genre/comics'],
-    ['Want to buy', c(b => b.ownership === 'buy'), '#/shelf/buy'],
+    ['Want to buy', shelf('buy'), '#/shelf/buy'],
   ];
 
   return `<section class="pstats" aria-label="Library statistics">
@@ -440,11 +505,12 @@ function draw() {
     app.innerHTML = stateBox('<h1>The shelf is out of reach</h1><p>We couldn\u2019t load the books. Check your connection, or your Supabase project may be paused.</p><button class="btn primary" type="button" data-retry>Try again</button>');
     return;
   }
+  grids = {};
   const q = norm(qEl.value);
   const parts = location.hash.replace(/^#\/?/, '').split('/');
   const page = parts[0] || 'home';
   const path = parts.slice(0, 2).join('/');
-  if (path !== lastPath) { filters = { lang: '', own: '', fmt: '', copies: '' }; lastPath = path; }
+  if (path !== lastPath) { filters = { lang: '', own: '', fmt: '', copies: '' }; lastPath = path; shown = {}; }
   if (q) { setNav(''); app.innerHTML = searchPage(q); return; }
   if (page === 'book') { setNav('books'); app.innerHTML = detailPage(parts[1] || ''); return; }
   if (page === 'shelf') {
@@ -470,18 +536,35 @@ function draw() {
 // Draw the page, then scroll the shelf bar so the current shelf is in view (matters on phones).
 function render() {
   draw();
+  watchMore();
+  const note = document.getElementById('offline-note');
+  if (offline && state === 'ready' && !note) {
+    app.insertAdjacentHTML('beforebegin', '<p id="offline-note" class="offline-note" role="status">No connection. Showing the shelf as it was last saved on this device.</p>');
+  } else if (!offline && note) note.remove();
   const bar = document.querySelector('.shelfbar-in');
   const cur = bar && bar.querySelector('[aria-current]');
   if (cur) bar.scrollLeft = cur.offsetLeft - (bar.clientWidth - cur.offsetWidth) / 2;
 }
 
+// Show the saved copy of the shelf at once (if this browser has one), then fetch the current shelf
+// and redraw only if something changed. With no connection, the saved copy stays on screen.
 async function load() {
   if (!configured) { state = 'setup'; render(); return; }
-  state = 'loading'; render();
-  try { books = await fetchBooks(); state = 'ready'; }
-  catch (err) { console.error(err); state = 'error'; }
+  const saved = state === 'ready' ? books : readShelfCache();
+  if (saved && saved.length) { books = saved; state = 'ready'; } else state = 'loading';
   render();
+  try {
+    const fresh = await fetchShelf();
+    const changed = state !== 'ready' || JSON.stringify(fresh) !== JSON.stringify(books);
+    offline = false;
+    if (changed) { books = fresh; state = 'ready'; writeShelfCache(fresh); }
+    if (changed || document.getElementById('offline-note')) render();
+  } catch (err) {
+    console.error(err);
+    if (state === 'ready') { offline = true; render(); } else { state = 'error'; render(); }
+  }
 }
+window.addEventListener('online', () => { if (offline) load(); });
 
 // ---------- events ----------
 // Search icon: click to expand the field, Escape / icon again / click elsewhere (while empty) to close.
@@ -498,7 +581,7 @@ function collapseSearch() {
 function closeSearch() {
   const had = qEl.value !== '';
   qEl.value = ''; collapseSearch();
-  if (had) render();
+  if (had) { shown = {}; render(); }
 }
 sBtn.addEventListener('click', () => {
   if (sw.classList.contains('open')) { closeSearch(); return; }
@@ -510,7 +593,7 @@ document.addEventListener('pointerdown', (e) => {
   if (sw.classList.contains('open') && !qEl.value && !e.target.closest('#sw')) collapseSearch();
 });
 
-qEl.addEventListener('input', render);
+qEl.addEventListener('input', () => { shown = {}; render(); });
 window.addEventListener('hashchange', () => { rememberBack(lastHash); lastHash = location.hash; qEl.value = ''; collapseSearch(); render(); window.scrollTo(0, 0); });
 // Clicking a top-bar link always leaves search, even if the address does not change.
 topBar.addEventListener('click', (e) => {
@@ -518,11 +601,12 @@ topBar.addEventListener('click', (e) => {
 });
 function useFallback(e) {
   const img = e.target;
-  // A cover link that no longer works: show the neutral "No cover" box instead of a broken picture.
+  // A cover link that no longer works: draw the title-and-author cover instead of a broken picture.
   if (e.type === 'error' && img.tagName === 'IMG' && !img.dataset.fb && img.closest('.cover, .cf-card')) {
-    const box = document.createElement('div');
-    box.className = 'nocover'; box.textContent = 'No cover';
-    img.replaceWith(box);
+    const holder = img.closest('[data-b]');
+    const b = holder && books.find((x) => String(x.id) === holder.dataset.b);
+    if (b) img.outerHTML = genCover(b);
+    else { const box = document.createElement('div'); box.className = 'nocover'; box.textContent = 'No cover'; img.replaceWith(box); }
     return;
   }
   if (img.tagName === 'IMG' && img.dataset.fb && (e.type === 'error' || img.naturalWidth <= 120)) {
@@ -553,8 +637,25 @@ app.addEventListener('click', (e) => {
     return;
   }
   const chip = e.target.closest('.chip');
-  if (chip) { filters[chip.dataset.g] = chip.dataset.v; render(); return; }
+  if (chip) { filters[chip.dataset.g] = chip.dataset.v; shown = {}; render(); return; }
+  const more = e.target.closest('[data-more]');
+  if (more) { showMore(more.dataset.more); return; }
+  const jump = e.target.closest('[data-jump]');
+  if (jump) {   // "Audiobooks ↓" on a mixed page: put every book on screen, then scroll to the audiobooks
+    e.preventDefault();
+    showMore('bk', true);
+    const target = document.querySelector('[data-grid="au"]');
+    if (target) target.previousElementSibling.scrollIntoView();
+    return;
+  }
   if (e.target.closest('[data-retry]')) load();
 });
 
 load();
+
+// ---------- installable app ----------
+// The service worker (sw.js) keeps a copy of the pages and covers you have seen, so the shelf opens
+// without a connection and Android offers "Install app". It only runs on https (or localhost).
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Service worker not registered:', err)); });
+}

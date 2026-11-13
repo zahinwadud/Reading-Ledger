@@ -3,53 +3,12 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 import * as CONFIG from './config.js';   // read by name, so an older config.js without the YouTube key still works
 
-// True once config.js has real values in it.
-export const configured =
-  SUPABASE_URL.startsWith('https://') && !/PASTE_YOUR/i.test(SUPABASE_URL + SUPABASE_ANON_KEY);
+// The helpers both pages share live in core.js (the public site loads only that file, not this one).
+import { configured } from './core.js';
+export { configured, STATUS, OWN, esc, norm, ytId, ytThumb, initTheme, coverUrl, coverOf } from './core.js';
 
 const sb = configured ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 const BUCKET = 'covers';
-
-// ---------- labels used on screen ----------
-export const STATUS = { want: 'Want to Read', reading: 'Currently Reading', read: 'Read' };
-export const OWN = { owned: 'Owned', buy: 'Want to Buy' };
-
-// ---------- shared helpers ----------
-// Escape text before it goes into HTML, so book data can never inject markup.
-export function esc(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-  ));
-}
-
-// Normalise text for searching: lower-case, no extra spaces. Works for Bengali too.
-export function norm(value) {
-  return String(value ?? '').normalize('NFC').toLowerCase().replace(/\s+/g, ' ').trim();
-}
-
-// Get the 11-character video ID from any common YouTube link
-// (watch?v=..., youtu.be/..., /embed/..., /shorts/..., /live/...). Returns '' if it is not one.
-export function ytId(url) {
-  try {
-    const u = new URL(String(url).trim());
-    const host = u.hostname.replace(/^(www|m|music)\./, '');
-    let id = '';
-    if (host === 'youtu.be') id = u.pathname.slice(1).split('/')[0];
-    else if (host === 'youtube.com' || host === 'youtube-nocookie.com') {
-      if (u.pathname === '/watch') id = u.searchParams.get('v') || '';
-      else { const m = u.pathname.match(/^\/(embed|shorts|live|v)\/([^/?]+)/); if (m) id = m[2]; }
-    }
-    return /^[\w-]{11}$/.test(id) ? id : '';
-  } catch (e) { return ''; }
-}
-
-// YouTube serves a free thumbnail for every video. "hqdefault" always exists (480x360, with black
-// bars that our 16:9 frame crops away); "maxresdefault" is sharper but missing on some videos;
-// "mqdefault" is a true 16:9 320x180 (good for small thumbnails).
-export function ytThumb(url, quality = 'hqdefault') {
-  const id = ytId(url);
-  return id ? `https://i.ytimg.com/vi/${id}/${quality}.jpg` : '';
-}
 
 // ---------- YouTube playlist import (optional) ----------
 const YT_KEY = CONFIG.YOUTUBE_API_KEY || '';
@@ -121,23 +80,7 @@ export async function fetchPlaylist(id) {
   return { id, title: info.items[0].snippet.title, items, skipped: ids.length - items.length, capped: !!token };
 }
 
-// Dark / light toggle, remembered in the browser.
-export function initTheme(button) {
-  const isDark = () => {
-    const root = document.documentElement;
-    return root.dataset.theme === 'dark' || (!root.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
-  };
-  const sync = () => button.setAttribute('aria-pressed', String(isDark()));
-  sync();
-  button.addEventListener('click', () => {
-    const next = isDark() ? 'light' : 'dark';
-    document.documentElement.dataset.theme = next;
-    try { localStorage.setItem('theme', next); } catch (e) { /* storage blocked: ignore */ }
-    sync();
-  });
-}
-
-// ---------- reading data (public) ----------
+// ---------- reading data (dashboard) ----------
 // Supabase sends back at most 1,000 rows per request, so a bigger library has to be read in pages.
 // The order is fixed (newest first, then by id) so no row is repeated or skipped between pages.
 export async function fetchBooks() {
@@ -155,19 +98,6 @@ export async function fetchBooks() {
   }
   const seen = new Set();                                   // a book added mid-read could appear twice
   return rows.filter((r) => (seen.has(r.id) ? false : seen.add(r.id)));
-}
-
-export function coverUrl(path) {
-  if (!path || !sb) return '';
-  return sb.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
-}
-
-// The cover to show for a book: my uploaded file first, then a web link found by the Goodreads import
-// (Open Library), otherwise '' (the page shows "No cover").
-export function coverOf(b) {
-  const uploaded = coverUrl(b.cover_path);
-  if (uploaded) return uploaded;
-  return /^https?:\/\//i.test(b.cover_url || '') ? b.cover_url : '';
 }
 
 // ---------- Goodreads import helpers (dashboard, owner only) ----------
