@@ -130,6 +130,7 @@ function renderAll() { renderStats(); renderRows(); renderBulk(); }
 
 // Has the database got the "series" columns yet? (They are added by a small SQL snippet: Tools > Series.)
 const hasSeries = () => books.length > 0 && 'series' in books[0];
+const hasArc = () => books.length > 0 && 'arc' in books[0];
 
 // The count cards. Reading / Read / To read count books, and audiobooks have their own card, exactly
 // like the public site. Clicking a card filters the list to it.
@@ -181,7 +182,7 @@ function matching() {
   const list = books.filter((b) =>
     (!st || (st === 'nocover' ? !coverOf(b) && !(b.format === 'Audiobook' && b.youtube_url) : b.status === st)) &&
     (!fmt || b.format === fmt) && (!lang || b.language === lang) && (!miss || miss(b)) &&
-    (!q || norm(b.title).includes(q) || norm(b.author).includes(q) || norm(b.series).includes(q)));
+    (!q || norm(b.title).includes(q) || norm(b.author).includes(q) || norm(b.series).includes(q) || norm(b.arc).includes(q)));
   const order = ORDER[$('fo').value];
   return order ? list.sort(order) : list;                 // books arrive newest first already
 }
@@ -201,7 +202,7 @@ function renderRows() {
   const actions = (b) => `
         <button class="btn" type="button" data-act="edit" data-id="${esc(b.id)}">${ICON.edit}Edit</button>
         <a class="btn" href="./#/book/${esc(b.id)}" aria-label="View ${esc(b.title)} on the site" title="View on the site">${ICON.eye}<span class="view-l">View</span></a>`;
-  const seriesLine = (b) => (b.series ? `<span class="in-series">${esc(b.series)}${b.series_no != null ? ' #' + esc(b.series_no) : ''}</span>` : '');
+  const seriesLine = (b) => (b.series || b.arc ? `<span class="in-series">${[b.series ? `${esc(b.series)}${b.series_no != null ? ' #' + esc(b.series_no) : ''}` : '', b.arc ? esc(b.arc) : ''].filter(Boolean).join(' \u00b7 ')}</span>` : '');
   const info = (b) => {
     const audio = b.format === 'Audiobook';
     return {
@@ -349,7 +350,10 @@ const BULK_INPUT = {
   copies: () => `<select id="bulk-v" aria-label="Copies I have">${options([['hardcopy', 'Hardcopy'], ['ebook', 'Ebook'], ['hardcopy,ebook', 'Hardcopy and Ebook'], ['', 'None']])}</select>`,
   series: () => (hasSeries()
     ? `<input id="bulk-v" type="text" list="series-list" placeholder="Series name (empty removes it)" aria-label="Series name">`
-    : '<span class="hint">Set up series first: Tools → Series.</span>'),
+    : '<span class="hint">Set up series first: Tools \u2192 Series.</span>'),
+  arc: () => (hasArc()
+    ? `<input id="bulk-v" type="text" list="arc-list" placeholder="Story arc (empty removes it)" aria-label="Story arc">`
+    : '<span class="hint">Set up story arcs first: Tools \u2192 Series.</span>'),
 };
 function renderBulk() {
   [...picked_ids].forEach((id) => { if (!books.some((b) => String(b.id) === id)) picked_ids.delete(id); });   // deleted meanwhile
@@ -391,6 +395,8 @@ $('bulk-apply').addEventListener('click', async () => {
     patchOf = () => ({ copies: value ? value.split(',') : [] });
   } else if (action === 'series') {
     patchOf = () => (value ? { series: value } : { series: null, series_no: null });
+  } else if (action === 'arc') {
+    patchOf = () => (value ? { arc: value } : { arc: null, arc_no: null });
   } else {
     chosen = chosen.filter((b) => b[action] !== value);
     patchOf = () => ({ [action]: value });
@@ -521,6 +527,11 @@ function openPanel(book) {
   $('f-series').value = b.series || '';
   $('f-series-no').value = b.series_no ?? '';
   setErr('series-no', '');
+  $('g-arc').hidden = $('g-arc-no').hidden = !hasArc();
+  $('f-arc').value = b.arc || '';
+  $('f-arc-no').value = b.arc_no ?? '';
+  setErr('arc-no', '');
+  $('arc-list').innerHTML = [...new Set(books.map((x) => x.arc).filter(Boolean))].sort(collator.compare).map((x) => `<option value="${esc(x)}">`).join('');
   $('series-list').innerHTML = [...new Set(books.map((x) => x.series).filter(Boolean))].sort(collator.compare).map((x) => `<option value="${esc(x)}">`).join('');
   $('delete-book').hidden = !book;
   syncStatus();
@@ -668,6 +679,7 @@ function validate() {
   const pages = $('f-pages').value.trim();
   if (!audio && pages && !/^[1-9]\d*$/.test(pages)) bad('pages', 'Pages must be a whole number above 0.');
   if ($('f-series-no').value.trim() && seriesNumber($('f-series-no').value) === null) bad('series-no', 'Enter a number, like 4.');
+  if ($('f-arc-no').value.trim() && seriesNumber($('f-arc-no').value) === null) bad('arc-no', 'Enter a number, like 1.');
   const yt = $('f-youtube').value.trim();
   if (audio && yt) {
     if (!ytId(yt)) bad('youtube', 'Paste a YouTube video link, like https://www.youtube.com/watch?v=\u2026 or https://youtu.be/\u2026');
@@ -694,6 +706,7 @@ function collect() {
     description: val('description') || null,
     finished_at: $('f-status').value === 'read' && $('f-finished').value ? $('f-finished').value : null,
     ...(hasSeries() ? { series: val('series') || null, series_no: val('series') ? seriesNumber(val('series-no')) : null } : {}),
+    ...(hasArc() ? { arc: val('arc') || null, arc_no: val('arc') ? seriesNumber(val('arc-no')) : null } : {}),
   };
 }
 
@@ -739,7 +752,7 @@ $('book-form').addEventListener('submit', async (e) => {
 });
 
 initImport({ getBooks: () => books, refresh, toast, statusBadge, badge });
-initTools({ getBooks: () => books, refresh, toast, handleErr, hasSeries, seriesNumber });
+initTools({ getBooks: () => books, refresh, toast, handleErr, hasSeries, hasArc, seriesNumber });
 
 // ---------- start ----------
 (async function boot() {

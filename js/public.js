@@ -96,6 +96,12 @@ SORTS.series = ['Series order', (a, b) => (a.series_no ?? Infinity) - (b.series_
 const SORT_SERIES = ['series', 'title', 'newest', 'oldest'];
 const seriesHref = (name) => `#/series/${encodeURIComponent(name)}`;
 const inSeries = (name) => { const key = norm(name); return books.filter((b) => b.series && norm(b.series) === key); };
+// Story arcs (comics): a named story that runs through some issues of one series, or of several.
+SORTS.arc = ['Reading order', (a, b) => (a.arc_no ?? Infinity) - (b.arc_no ?? Infinity) || collator.compare(a.series || '', b.series || '') || SORTS.series[1](a, b)];
+const SORT_ARC = ['arc', 'title', 'newest', 'oldest'];
+const arcHref = (name) => `#/arc/${encodeURIComponent(name)}`;
+const inArc = (name) => { const key = norm(name); return books.filter((b) => b.arc && norm(b.arc) === key); };
+const hasBn = (text) => /[\u0980-\u09FF]/.test(text || '');
 
 // Is the owner signed in on this device? (The dashboard leaves its sign-in in the browser's storage.)
 // This only decides whether to show the "Edit" shortcut; the database still checks every change.
@@ -553,16 +559,19 @@ function genrePage(slug) {
 
 // ---------- series and comics ----------
 // What a series looks like as a whole: how far through it I am, and what comes next.
-function seriesInfo(list) {
-  const ordered = list.slice().sort(SORTS.series[1]);
+function seriesInfo(list, order = SORTS.series[1], name = '') {
+  const ordered = list.slice().sort(order);
   const read = ordered.filter((b) => b.status === 'read').length;
   const reading = ordered.find((b) => b.status === 'reading');
   const started = read > 0 || Boolean(reading);
   // Next up: the one being read now, otherwise the first unread one after the last one read.
   const lastRead = ordered.map((b) => b.status).lastIndexOf('read');
   const next = reading || ordered.slice(lastRead + 1).find((b) => b.status !== 'read') || ordered.find((b) => b.status !== 'read') || null;
-  return { name: ordered[0].series, list: ordered, total: ordered.length, read, started, done: read === ordered.length, next };
+  return { name: name || ordered[0].series, list: ordered, total: ordered.length, read, started, done: read === ordered.length, next };
 }
+const arcInfo = (list) => seriesInfo(list, SORTS.arc[1], list[0].arc);
+// "#608" inside its own series; "Batman #608" where issues of several series can meet (a story arc).
+const issueLabel = (b) => (b.series && b.series_no != null ? `${b.series} #${b.series_no}` : b.title);
 const progressBar = (read, total) => `<span class="pbar" role="img" aria-label="${read} of ${total} read"><i style="width:${total ? Math.round((read / total) * 100) : 0}%"></i></span>`;
 const numberOf = (b) => (b.series_no != null ? `#${b.series_no}` : b.title);
 
@@ -583,6 +592,48 @@ function seriesPage(name) {
     <h1 class="${/[ঀ-৿]/.test(label) ? 'bn' : ''}">${esc(label)}</h1>
     <div class="sprog">${progressBar(info.read, info.total)}<span><b>${info.read} of ${info.total}</b> read${nextLine ? ` · ${nextLine}` : ''}</span></div>
     <div class="filters">${sortSelect(SORT_SERIES)}</div>
+    ${arcGroups(list) || gridHtml(list, seriesCard)}
+  </div>`;
+}
+
+// A series in series order, split where the story arc changes: each run of issues gets a small heading
+// with the arc's name and progress. Returns '' when the series has no arcs (or another sort is chosen).
+function arcGroups(list) {
+  const key = SORT_SERIES.includes(sortKey) ? sortKey : SORT_SERIES[0];
+  if (key !== 'series' || !list.some((b) => b.arc)) return '';
+  const runs = [];
+  list.forEach((b) => {
+    const arc = b.arc || '';
+    const last = runs[runs.length - 1];
+    if (last && norm(last.arc) === norm(arc)) last.list.push(b); else runs.push({ arc, list: [b] });
+  });
+  return runs.map((run, i) => {
+    const nums = run.list.map((b) => b.series_no).filter((n) => n != null);
+    const span = nums.length ? (nums[0] === nums[nums.length - 1] ? `#${nums[0]}` : `#${nums[0]} to #${nums[nums.length - 1]}`) : '';
+    const read = run.list.filter((b) => b.status === 'read').length;
+    const head = `<div class="arc-head"><h2>${run.arc ? `<a class="${hasBn(run.arc) ? 'bn' : ''}" href="${esc(arcHref(run.arc))}">${esc(run.arc)}</a>` : (runs.length > 1 ? 'Other issues' : 'Issues')}</h2>
+      <span>${[span, `${read} of ${run.list.length} read`].filter(Boolean).join(' \u00b7 ')}</span>${progressBar(read, run.list.length)}</div>`;
+    return gridBlock(`g${i}`, run.list, false, seriesCard, head);
+  }).join('');
+}
+
+// One story arc, in reading order. Its issues can come from more than one series.
+function arcPage(name) {
+  const all = inArc(name);
+  if (!all.length) return notFound();
+  const info = arcInfo(all);
+  const list = sortList(all, SORT_ARC);
+  const label = info.name;
+  const seriesNames = [...new Set(all.map((b) => b.series).filter(Boolean))];
+  setNav('comics');
+  document.title = `${label} \u2013 Reading Ledger`;
+  const nextLine = info.done ? 'All read.' : info.next
+    ? `${info.started ? 'Next' : 'Start with'}: <a href="#/book/${esc(info.next.id)}">${esc(issueLabel(info.next))}</a>` : '';
+  return `<div class="wrap">
+    <p class="eyebrow">Story arc${seriesNames.length ? ` \u00b7 in ${seriesNames.map((s) => `<a href="${esc(seriesHref(s))}">${esc(s)}</a>`).join(', ')}` : ''}</p>
+    <h1 class="${hasBn(label) ? 'bn' : ''}">${esc(label)}</h1>
+    <div class="sprog">${progressBar(info.read, info.total)}<span><b>${info.read} of ${info.total}</b> read${nextLine ? ` \u00b7 ${nextLine}` : ''}</span></div>
+    <div class="filters">${sortSelect(SORT_ARC)}</div>
     ${gridHtml(list, seriesCard)}
   </div>`;
 }
@@ -600,17 +651,23 @@ function comicsPage() {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(b);
   });
-  const all = [...groups.values()].map(seriesInfo);
+  const all = [...groups.values()].map((list) => seriesInfo(list));
   const show = route().params.get('show') || '';
   const kept = all.filter((x) => (show === 'reading' ? x.started && !x.done : show === 'done' ? x.done : show === 'new' ? !x.started : true))
     .sort((a, b) => (b.started && !b.done ? 1 : 0) - (a.started && !a.done ? 1 : 0) || collator.compare(a.name, b.name));
-  const inProgress = all.filter((x) => x.started && !x.done && x.next);
+  // Story arcs among the comics.
+  const arcMap = new Map();
+  comics.forEach((b) => { if (!b.arc) return; const key = norm(b.arc); if (!arcMap.has(key)) arcMap.set(key, []); arcMap.get(key).push(b); });
+  const arcs = [...arcMap.values()].map(arcInfo).map((x) => ({ ...x, isArc: true }));
+  // Continue reading: an arc that is under way stands for its series; a series shows only when its next issue is in no arc.
+  const arcsNow = arcs.filter((x) => x.started && !x.done && x.next);
+  const inProgress = [...arcsNow, ...all.filter((x) => x.started && !x.done && x.next && !x.next.arc)];
   const bnOf = (text) => (/[ঀ-৿]/.test(text) ? 'bn' : '');
   const stack = (x) => {
     // Up to three covers fanned out: the next issue on top.
     const top = x.next || x.list[0];
     const under = x.list.filter((b) => b !== top).slice(0, 2);
-    return `<a class="stack" href="${esc(seriesHref(x.name))}">
+    return `<a class="stack" href="${esc(x.isArc ? arcHref(x.name) : seriesHref(x.name))}">
       <div class="stack-covers n${under.length + 1}">${under.reverse().map((b) => coverHtml(b)).join('')}${coverHtml(top)}</div>
       <h3 class="ct ${bnOf(x.name)}">${esc(x.name)}</h3>
       <p class="ca">${x.read} of ${x.total} read</p>
@@ -622,7 +679,7 @@ function comicsPage() {
       <div class="row">${inProgress.map((x) => `<a class="card" href="#/book/${esc(x.next.id)}">
         ${coverHtml(x.next)}
         <h3 class="ct ${bnOf(x.name)}">${esc(x.name)}</h3>
-        <p class="ca">Next: ${esc(numberOf(x.next))} · ${x.read} of ${x.total} read</p>
+        <p class="ca">Next: ${esc(x.isArc ? issueLabel(x.next) : numberOf(x.next))} \u00b7 ${x.read} of ${x.total} read</p>
         ${progressBar(x.read, x.total)}
       </a>`).join('')}</div>
     </section>` : '';
@@ -630,8 +687,11 @@ function comicsPage() {
   const read = comics.filter((b) => b.status === 'read').length;
   return `<div class="wrap">
     <h1>Comics</h1>
-    <p class="lede">${comics.length} ${comics.length === 1 ? 'issue' : 'issues and books'} · ${all.length} series · ${read} read</p>
+    <p class="lede">${comics.length} ${comics.length === 1 ? 'issue' : 'issues and books'} · ${all.length} series${arcs.length ? ` \u00b7 ${arcs.length} ${arcs.length === 1 ? 'story arc' : 'story arcs'}` : ''} \u00b7 ${read} read</p>
     ${cont}
+    ${arcs.length ? `<section class="shelf-row"><div class="row-head"><h2>Story arcs</h2></div>
+      <div class="grid stacks">${arcs.slice().sort((a, b) => (b.started && !b.done ? 1 : 0) - (a.started && !a.done ? 1 : 0) || collator.compare(a.name, b.name)).map(stack).join('')}</div>
+    </section>` : ''}
     ${all.length ? `<section class="shelf-row"><div class="row-head"><h2>Series</h2></div>
       <div class="filters"><div class="chipgroup" role="group" aria-label="Show">${chip('', 'All')}${chip('reading', 'In progress')}${chip('new', 'Not started')}${chip('done', 'Finished')}</div></div>
       ${kept.length ? `<div class="grid stacks">${kept.map(stack).join('')}</div>` : '<p class="empty">No series here.</p>'}
@@ -843,14 +903,19 @@ function detailPage(id) {
   ].map(([k, v]) => `<tr><th scope="row">${k}</th><td>${v || v === 0 ? esc(v) : '\u2014'}</td></tr>`).join('');
   const seriesNo = b.series_no != null ? ` #${esc(b.series_no)}` : '';
   const bnSeries = /[\u0980-\u09FF]/.test(b.series || '') ? 'bn' : '';
-  const seriesLine = b.series ? `<p class="series-line"><a class="${bnSeries}" href="${esc(seriesHref(b.series))}">${esc(b.series)}</a>${seriesNo}</p>` : '';
-  const siblings = b.series ? inSeries(b.series).sort(SORTS.series[1]) : [];
+  const arcPart = b.arc ? `${b.series ? ' \u00b7 part of ' : 'Part of '}<a href="${esc(arcHref(b.arc))}">${esc(b.arc)}</a>` : '';
+  const seriesLine = b.series || b.arc ? `<p class="series-line">${b.series ? `<a class="${bnSeries}" href="${esc(seriesHref(b.series))}">${esc(b.series)}</a>${seriesNo}` : ''}${arcPart}</p>` : '';
+  // In a story arc, the row under the book follows the arc; otherwise it follows the series.
+  const arcMates = b.arc ? inArc(b.arc).sort(SORTS.arc[1]) : [];
+  const siblings = arcMates.length > 1 ? arcMates : b.series ? inSeries(b.series).sort(SORTS.series[1]) : [];
+  const rowName = arcMates.length > 1 ? b.arc : b.series;
+  const rowHref = arcMates.length > 1 ? arcHref(b.arc) : b.series ? seriesHref(b.series) : '';
   // Show the books around this one in the series (the one before it first).
   const at = Math.max(0, siblings.findIndex((x) => x.id === b.id) - 1);
   const nearby = siblings.slice(Math.min(at, Math.max(0, siblings.length - 12)), Math.min(at, Math.max(0, siblings.length - 12)) + 12).filter((x) => x.id !== b.id);
-  const moreSeries = nearby.length ? `<section class="shelf-row more-by" aria-label="More in this series">
-      <div class="row-head"><h2>More in <span class="${bnSeries}">${esc(b.series)}</span></h2><a href="${esc(seriesHref(b.series))}">See all (${siblings.length})</a></div>
-      <div class="row">${nearby.map(homeCard).join('')}</div>
+  const moreSeries = nearby.length ? `<section class="shelf-row more-by" aria-label="More in ${esc(rowName)}">
+      <div class="row-head"><h2>More in <span class="${hasBn(rowName) ? 'bn' : ''}">${esc(rowName)}</span></h2><a href="${esc(rowHref)}">See all (${siblings.length})</a></div>
+      <div class="row">${nearby.map(seriesCard).join('')}</div>
     </section>` : '';
   const others = books.filter((x) => x.id !== b.id && norm(x.author) === norm(b.author)).sort(byTitle);
   const moreBy = others.length ? `<section class="shelf-row more-by" aria-label="More by this author">
@@ -893,7 +958,7 @@ function detailPage(id) {
 // in any order ("ray feluda" finds Feluda books by Satyajit Ray). Title matches come first.
 const hayCache = new WeakMap();
 function hay(b) {
-  if (!hayCache.has(b)) hayCache.set(b, norm(`${b.title} ${b.author} ${b.series || ''} ${(b.genres || []).join(' ')}`));
+  if (!hayCache.has(b)) hayCache.set(b, norm(`${b.title} ${b.author} ${b.series || ''} ${b.arc || ''} ${(b.genres || []).join(' ')}`));
   return hayCache.get(b);
 }
 function searchPage(text) {
@@ -919,7 +984,7 @@ function rememberBack(from) {
   const [page, name] = path.split('/');
   if (page === 'book') return;                               // never go "back" to another book page
   backHash = from || '#/';
-  backLabel = !page ? 'Home' : page === 'search' ? 'search results' : page === 'author' || page === 'series' ? safeDecode(name || '') || 'Books' : page === 'comics' ? 'Comics' : page === 'stats' ? 'Stats' : 'Books';
+  backLabel = !page ? 'Home' : page === 'search' ? 'search results' : page === 'author' || page === 'series' || page === 'arc' ? safeDecode(name || '') || 'Books' : page === 'comics' ? 'Comics' : page === 'stats' ? 'Stats' : 'Books';
 }
 
 // ---------- router ----------
@@ -960,6 +1025,7 @@ function draw() {
     return;
   }
   if (page === 'series') { setNav('books'); app.innerHTML = seriesPage(parts.slice(1).join('/')); return; }
+  if (page === 'arc') { setNav('comics'); app.innerHTML = arcPage(parts.slice(1).join('/')); return; }
   if (page === 'comics') { setNav('comics'); app.innerHTML = comicsPage(); return; }
   if (page === 'stats') { setNav('stats'); app.innerHTML = statsPage(); return; }
   if (page === 'author') { setNav('books'); app.innerHTML = authorPage(parts.slice(1).join('/')); return; }

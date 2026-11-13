@@ -22,6 +22,7 @@ function show(title, body, actions) {
 }
 const getKey = () => { try { return localStorage.getItem(KEY_NAME) || ''; } catch (e) { return ''; } };
 const hasSeries = () => { const b = hooks.getBooks(); return b.length > 0 && 'series' in b[0]; };
+const hasArc = () => { const b = hooks.getBooks(); return b.length > 0 && 'arc' in b[0]; };
 
 // ---------- talking to Comic Vine ----------
 // Comic Vine answers web pages through "JSONP": the reply arrives as a small script that calls a
@@ -117,13 +118,25 @@ function stepSearch(message = '') {
   show('Import comics', `
     <p style="margin-top:0">Search for a series (like <i>Batman</i>) or a story arc (like <i>Batman: Hush</i>).</p>
     <form id="cv-form" class="genre-add"><input id="cv-q" type="search" placeholder="Series or story arc" autocomplete="off" aria-label="Series or story arc" value="${esc(S.query || '')}"><button class="btn primary" type="submit">Search</button></form>
+    <div class="chipgroup cv-kind" role="group" aria-label="Look for">${[['volume,story_arc', 'Everything'], ['volume', 'Series only'], ['story_arc', 'Story arcs only']].map(([v, t]) => `<button type="button" class="chip" data-kind="${v}" aria-pressed="${(S.kind || 'volume,story_arc') === v}">${t}</button>`).join('')}</div>
     <p class="err" role="alert">${esc(message)}</p>
     <div id="cv-results" class="imp-list">${resultsHtml()}</div>`,
   '<button class="btn" type="button" id="cv-cancel">Cancel</button><button class="btn" type="button" id="cv-key-btn">Change key</button>');
   $('cv-cancel').addEventListener('click', () => dlg().close());
   $('cv-key-btn').addEventListener('click', () => stepKey());
   $('cv-form').addEventListener('submit', (e) => { e.preventDefault(); search(); });
-  $('cv-results').addEventListener('click', (e) => { const row = e.target.closest('[data-pick]'); if (row) pick(S.results[Number(row.dataset.pick)]); });
+  $('cv-results').addEventListener('click', (e) => {
+    if (e.target.closest('#cv-more-results')) { search(true); return; }
+    const row = e.target.closest('[data-pick]');
+    if (row) pick(S.results[Number(row.dataset.pick)]);
+  });
+  document.querySelector('.cv-kind').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-kind]');
+    if (!chip) return;
+    S.kind = chip.dataset.kind;
+    document.querySelectorAll('.cv-kind .chip').forEach((el) => el.setAttribute('aria-pressed', String(el === chip)));
+    if ($('cv-q').value.trim()) search();
+  });
   $('cv-q').focus();
 }
 
@@ -135,22 +148,32 @@ function resultsHtml() {
       <span><b>${esc(r.name)}${r.year ? ` (${esc(r.year)})` : ''}</b>
         <span class="hint">${r.arc ? 'Story arc' : 'Series'}${r.publisher ? ` · ${esc(r.publisher)}` : ''}${r.count ? ` · ${plural(r.count, 'issue', 'issues')}` : ''}</span>
         ${r.deck ? `<span class="hint">${esc(r.deck)}</span>` : ''}</span>
-    </button>`).join('');
+    </button>`).join('')
+    + (S.total > S.results.length ? `<p class="cv-more"><span class="hint">Showing ${S.results.length} of ${S.total.toLocaleString()}</span> <button type="button" class="btn" id="cv-more-results">Show more</button></p>` : '');
 }
 
-async function search() {
+// Comic Vine hands search results over a page at a time. "Show more" fetches the next page and adds it.
+const PER_PAGE = 50;
+async function search(more = false) {
   const q = $('cv-q').value.trim();
   if (!q) return;
+  if (!more || q !== S.query) { S.results = null; S.page = 0; S.total = 0; more = false; }
   S.query = q;
-  $('cv-results').innerHTML = '<p class="hint">Searching…</p>';
+  if (more) { const btn = $('cv-more-results'); if (btn) { btn.disabled = true; btn.textContent = 'Loading\u2026'; } }
+  else $('cv-results').innerHTML = '<p class="hint">Searching\u2026</p>';
   try {
-    const data = await cv('search', { query: q, resources: 'volume,story_arc', limit: '20', field_list: 'id,name,start_year,publisher,count_of_issues,image,deck,resource_type' });
-    S.results = (data.results || []).map((r) => ({
+    const data = await cv('search', { query: q, resources: S.kind || 'volume,story_arc', limit: String(PER_PAGE), page: String(S.page + 1), field_list: 'id,name,start_year,publisher,count_of_issues,image,deck,resource_type' });
+    const batch = (data.results || []).map((r) => ({
       id: r.id, arc: r.resource_type === 'story_arc', name: r.name || '', year: r.start_year || '', count: Number(r.count_of_issues) || 0,
       publisher: (r.publisher && r.publisher.name) || '', deck: plainText(r.deck, 140), thumb: imageOf(r.image, 'thumb'),
     }));
-    // series with the most issues first; story arcs keep Comic Vine's order after them
-    S.results.sort((a, b) => (a.arc ? 1 : 0) - (b.arc ? 1 : 0) || b.count - a.count);
+    const seen = new Set((S.results || []).map((r) => `${r.arc}:${r.id}`));
+    S.results = [...(S.results || []), ...batch.filter((r) => !seen.has(`${r.arc}:${r.id}`))];
+    S.page += 1;
+    // Stop offering more when a page comes back empty, even if Comic Vine's total says otherwise.
+    S.total = batch.length ? Math.max(Number(data.number_of_total_results) || 0, S.results.length) : S.results.length;
+    // On the first page, series with the most issues come first, then story arcs; later pages are added below.
+    if (!more) S.results.sort((a, b) => (a.arc ? 1 : 0) - (b.arc ? 1 : 0) || b.count - a.count);
     if (!stopped) $('cv-results').innerHTML = resultsHtml();
   } catch (err) { if (!stopped) stepSearch(err.message); }
 }
@@ -199,7 +222,7 @@ async function loadVolume(item, from, to) {
     if (stale(run)) return;
     const issues = all.map(tidyIssue).filter((x) => (from === -Infinity && to === Infinity) || (x.no !== null && x.no >= from && x.no <= to));
     issues.sort((a, b) => (a.no ?? Infinity) - (b.no ?? Infinity) || a.date.localeCompare(b.date));
-    startReview(item.name, issues, true, true);
+    startReview({ mode: 'series', name: item.name, issues });
   } catch (err) { if (!stale(run)) stepSearch(err.message); }
 }
 
@@ -219,77 +242,89 @@ async function loadArc(item) {
     if (stale(run)) return;
     const byId = new Map(found.map((x) => [x.id, x]));
     const issues = ids.map((id) => byId.get(id)).filter(Boolean).map(tidyIssue);          // keep the arc's reading order
-    const oneVolume = new Set(issues.map((x) => x.volume)).size === 1 && issues.every((x) => x.no !== null);
-    if (oneVolume) issues.sort((a, b) => a.no - b.no);
-    startReview(item.name, issues, oneVolume);
+    startReview({ mode: 'arc', name: item.name, issues });
   } catch (err) { if (!stale(run)) stepSearch(err.message); }
 }
 
 function pick(item) { if (item.arc) loadArc(item); else if (item.count > 40) stepRange(item); else loadVolume(item, -Infinity, Infinity); }
 
 // ---------- step 4: review ----------
-// useNumbers = the series number is the comic's own issue number; otherwise it is the place in the list.
-// fromSeries = the issues all come from the one series that was picked (their titles then follow the series name you type).
-function startReview(name, issues, useNumbers, fromSeries = false) {
+// A comic has three levels: the series it was published in (Batman), its number there (#608), and
+// sometimes a story arc that runs through several issues (Hush).
+//   mode 'series' = you picked a series: every issue belongs to it; the arc can be read from Comic Vine.
+//   mode 'arc'    = you picked a story arc: each issue keeps its own series; the arc is the one you picked.
+function startReview({ mode, name, issues }) {
   if (!issues.length) { stepSearch('No issues matched. Check the issue numbers.'); return; }
-  // Issues already on the shelf are not added again; they can receive their cover instead.
+  // Issues already on the shelf are not added again; they only get what they are missing.
   const have = new Map();
   hooks.getBooks().forEach((b) => { const k = shelfKey(b); if (k && !have.has(k)) have.set(k, b); if (b.series && b.series_no != null) { const k2 = `${seriesCore(b.series)}#${Number(b.series_no)}`; if (!have.has(k2)) have.set(k2, b); } });
-  S.series = name;
-  S.useNumbers = useNumbers;
-  S.fromSeries = fromSeries;
+  const volumes = [...new Set(issues.map((x) => x.volume).filter(Boolean))];
+  S.mode = mode;
+  S.arc = mode === 'arc' ? name : '';
+  S.oneSeries = mode === 'series' || volumes.length <= 1;
   S.rows = issues.map((x, i) => {
-    const seriesNo = useNumbers ? x.no : i + 1;
-    const title = `${x.volume || name} #${x.number || i + 1}`;
-    const existing = (x.no != null && (have.get(`${seriesCore(x.volume || name)}#${x.no}`) || have.get(`${seriesCore(name)}#${x.no}`))) || null;
+    const volume = mode === 'series' ? name : (x.volume || name);
+    const existing = (x.no != null && have.get(`${seriesCore(volume)}#${x.no}`)) || null;
     const needsCover = Boolean(existing && !coverOf(existing) && x.cover);
-    return { ...x, seriesNo, title, existing, needsCover, sel: existing ? needsCover : true, status: 'want' };
+    const canFill = needsCover || Boolean(existing && hasArc() && !existing.arc);
+    return { ...x, volume, seriesNo: x.no, arcNo: mode === 'arc' ? i + 1 : null, existing, needsCover, canFill, sel: existing ? canFill : true, status: 'want' };
   });
+  // If these issues are on the shelf under a slightly different series name ("Batman (1940-2011)"), keep that name.
+  const known = S.rows.map((r) => r.existing && r.existing.series).filter(Boolean);
+  S.series = known.length ? known.sort((a, b) => known.filter((v) => v === b).length - known.filter((v) => v === a).length)[0] : (mode === 'series' ? name : volumes[0] || name);
   stepReview();
 }
 
 function stepReview() {
   const rows = S.rows;
   const numbered = rows.filter((r) => r.seriesNo != null);
+  const arcs = hasArc();
   show('Check the list', `
     <div class="imp-opts">
-      <div class="field"><label for="cv-series">Series name on your site</label><input id="cv-series" type="text" value="${esc(S.series)}"></div>
+      ${S.oneSeries
+    ? `<div class="field"><label for="cv-series">Series name on your site</label><input id="cv-series" type="text" value="${esc(S.series)}"><p class="hint">The series the issues were published in. Their titles follow it: “${esc(S.series)} #${esc(rows[0].number || '1')}”.</p></div>`
+    : '<p class="hint">This story arc runs through more than one series. Each issue keeps the name of its own series.</p>'}
+      ${arcs ? `<div class="field"><label for="cv-arc">Story arc</label><input id="cv-arc" type="text" value="${esc(S.arc)}" placeholder="${S.mode === 'series' ? 'Leave empty to read it from Comic Vine' : ''}">
+        ${S.mode === 'series' ? '<label class="imp-opt" style="margin-top:8px"><input type="checkbox" id="cv-autoarc" checked><span>Read each issue’s story arc from Comic Vine<span class="hint">Used when the box above is empty. Issues that belong to no arc stay without one.</span></span></label>' : ''}</div>`
+    : '<p class="hint">Story arcs are not switched on in your database yet, so issues are saved without one. Tools → Series shows the two lines to run.</p>'}
       <div class="fgrid">
         <div class="field"><label for="cv-own">Ownership</label><select id="cv-own"><option value="owned">Owned</option><option value="buy">Want to Buy</option></select></div>
         <div class="field"><label for="cv-copies">Copy</label><select id="cv-copies"><option value="ebook">Ebook (digital)</option><option value="hardcopy">Hardcopy</option><option value="">Not recorded</option></select></div>
       </div>
-      ${numbered.length ? `<div class="field"><label for="cv-upto">I have read up to</label><select id="cv-upto"><option value="">Nothing yet</option>${numbered.map((r) => `<option value="${r.seriesNo}">#${esc(r.seriesNo)}</option>`).join('')}</select><p class="hint">Marks every issue up to that one as Read. You can still change each issue below.</p></div>` : ''}
+      ${numbered.length ? `<div class="field"><label for="cv-upto">I have read up to</label><select id="cv-upto"><option value="">Nothing yet</option>${numbered.map((r) => `<option value="${r.id}">${esc(S.oneSeries ? '' : `${r.volume} `)}#${esc(r.number)}</option>`).join('')}</select><p class="hint">Marks every new issue up to that one as Read. You can still change each issue below.</p></div>` : ''}
       <label class="imp-opt"><input type="checkbox" id="cv-writers" checked><span>Look up the writers and summaries<span class="hint">One extra question to Comic Vine per issue, about a second each. Without it the author is saved as “Unknown”.</span></span></label>
       ${hasSeries() ? '' : '<p class="hint">Series are not switched on in your database yet (Tools → Series), so the issues will be saved without a series name.</p>'}
     </div>
     <div class="imp-bar"><span id="cv-count"></span><span><button class="btn" type="button" id="cv-all">All</button> <button class="btn" type="button" id="cv-none">None</button></span></div>
     <div class="imp-list" id="cv-list"></div>`,
   '<button class="btn" type="button" id="cv-back">Back</button><button class="btn primary" type="button" id="cv-import">Import</button>');
+  const haveText = (r) => (!r.canFill ? 'On your shelf already,<br>nothing to add'
+    : `On your shelf already:<br>only its ${[r.needsCover ? 'cover' : '', arcs && !r.existing.arc ? 'story arc' : ''].filter(Boolean).join(' and ')} ${r.needsCover && arcs && !r.existing.arc ? 'are' : 'is'} added`);
   const draw = () => {
     $('cv-list').innerHTML = rows.map((r, i) => `<div class="cv-issue${r.sel ? '' : ' off'}">
-        <input type="checkbox" data-sel="${i}" aria-label="Import ${esc(r.title)}"${r.sel ? ' checked' : ''}${r.existing && !r.needsCover ? ' disabled' : ''}>
+        <input type="checkbox" data-sel="${i}" aria-label="Import ${esc(r.volume)} #${esc(r.number)}"${r.sel ? ' checked' : ''}${r.existing && !r.canFill ? ' disabled' : ''}>
         <span class="thumb">${r.thumb ? `<img src="${esc(r.thumb)}" alt="" loading="lazy">` : ''}</span>
-        <span class="cv-info"><b>${esc(r.title)}</b>${r.name ? `<span class="hint">${esc(r.name)}</span>` : ''}<span class="hint">${esc(r.date.slice(0, 7))}</span></span>
+        <span class="cv-info"><b>${esc(r.volume)} #${esc(r.number)}</b>${r.name ? `<span class="hint">${esc(r.name)}</span>` : ''}<span class="hint">${esc(r.date.slice(0, 7))}</span></span>
         ${r.existing
-    ? `<span class="hint cv-have">${r.needsCover ? 'On your shelf already:<br>only its cover is added' : 'On your shelf already,<br>with a cover'}</span>`
-    : `<select data-status="${i}" aria-label="Reading status of ${esc(r.title)}"><option value="want"${r.status === 'want' ? ' selected' : ''}>Want to Read</option><option value="reading"${r.status === 'reading' ? ' selected' : ''}>Reading</option><option value="read"${r.status === 'read' ? ' selected' : ''}>Read</option></select>`}
+    ? `<span class="hint cv-have">${haveText(r)}</span>`
+    : `<select data-status="${i}" aria-label="Reading status of ${esc(r.volume)} #${esc(r.number)}"><option value="want"${r.status === 'want' ? ' selected' : ''}>Want to Read</option><option value="reading"${r.status === 'reading' ? ' selected' : ''}>Reading</option><option value="read"${r.status === 'read' ? ' selected' : ''}>Read</option></select>`}
       </div>`).join('');
     const n = rows.filter((r) => r.sel).length;
+    const fresh = rows.filter((r) => r.sel && !r.existing).length;
     $('cv-count').textContent = `${n} of ${rows.length} selected`;
     $('cv-import').disabled = n === 0;
-    const fresh = rows.filter((r) => r.sel && !r.existing).length;
-    $('cv-import').textContent = fresh === n ? `Import ${plural(n, 'issue', 'issues')}` : fresh ? `Import ${fresh} and add ${n - fresh} ${n - fresh === 1 ? 'cover' : 'covers'}` : `Add ${plural(n, 'cover', 'covers')}`;
+    $('cv-import').textContent = fresh === n ? `Import ${plural(n, 'issue', 'issues')}` : fresh ? `Import ${fresh} and update ${n - fresh}` : `Update ${plural(n, 'issue', 'issues')}`;
   };
   draw();
   $('cv-list').addEventListener('change', (e) => {
     if (e.target.dataset.sel !== undefined) { rows[Number(e.target.dataset.sel)].sel = e.target.checked; draw(); }
     if (e.target.dataset.status !== undefined) rows[Number(e.target.dataset.status)].status = e.target.value;
   });
-  $('cv-all').addEventListener('click', () => { rows.forEach((r) => { r.sel = !r.existing || r.needsCover; }); draw(); });
+  $('cv-all').addEventListener('click', () => { rows.forEach((r) => { r.sel = !r.existing || r.canFill; }); draw(); });
   $('cv-none').addEventListener('click', () => { rows.forEach((r) => { r.sel = false; }); draw(); });
   if ($('cv-upto')) $('cv-upto').addEventListener('change', (e) => {
-    const upto = e.target.value === '' ? -Infinity : Number(e.target.value);
-    rows.forEach((r) => { if (r.seriesNo != null) r.status = r.seriesNo <= upto ? 'read' : 'want'; });
+    const at = rows.findIndex((r) => String(r.id) === e.target.value);     // the list is in reading order
+    rows.forEach((r, i) => { r.status = at >= 0 && i <= at ? 'read' : 'want'; });
     draw();
   });
   $('cv-back').addEventListener('click', () => stepSearch());
@@ -299,29 +334,34 @@ function stepReview() {
 // ---------- step 5: save ----------
 async function runImport() {
   const picked = S.rows.filter((r) => r.sel);
-  const chosen = picked.filter((r) => !r.existing);                  // new issues to add
-  const covers = picked.filter((r) => r.existing && r.needsCover);   // issues already on the shelf: cover only
-  const series = $('cv-series').value.replace(/\s+/g, ' ').trim() || S.series;
+  const typedSeries = S.oneSeries ? ($('cv-series').value.replace(/\s+/g, ' ').trim() || S.series) : '';
+  const seriesOf = (r) => typedSeries || r.volume;
+  const arcs = hasArc();
+  const typedArc = arcs ? $('cv-arc').value.replace(/\s+/g, ' ').trim() : '';
+  const autoArc = arcs && !typedArc && S.mode === 'series' && $('cv-autoarc').checked;
   const ownership = $('cv-own').value;
   const copies = $('cv-copies').value ? [$('cv-copies').value] : [];
-  const details = $('cv-writers').checked;
+  const writers = $('cv-writers').checked;
   const run = (S.run += 1);
-  stepBusy('Importing', details ? 'Looking up the writers…' : 'Saving…');
-  if (details) {
-    for (let i = 0; i < chosen.length && !stale(run); i += 1) {
-      tick(`Looking up ${i + 1} of ${chosen.length}: ${chosen[i].title}`, i, chosen.length);
-      try {
-        const d = (await cv(`issue/4000-${chosen[i].id}`, { field_list: 'person_credits,deck,description' })).results || {};
-        chosen[i].author = writersOf(d.person_credits);
-        chosen[i].about = plainText(d.deck || d.description);
-      } catch (err) { chosen[i].author = ''; }             // one missing answer should not stop the import
-    }
-    if (stale(run)) return;
+  // Which issues need one more question to Comic Vine: new ones for the writer, any without an arc for the arc.
+  const ask = picked.filter((r) => (!r.existing && writers) || (autoArc && !(r.existing && r.existing.arc)));
+  stepBusy('Importing', ask.length ? 'Asking Comic Vine about each issue…' : 'Saving…');
+  for (let i = 0; i < ask.length && !stale(run); i += 1) {
+    const r = ask[i];
+    tick(`Looking up ${i + 1} of ${ask.length}: ${r.volume} #${r.number}`, i, ask.length);
+    try {
+      const d = (await cv(`issue/4000-${r.id}`, { field_list: 'person_credits,deck,description,story_arc_credits' })).results || {};
+      r.author = writersOf(d.person_credits);
+      r.about = plainText(d.deck || d.description);
+      r.foundArc = ((d.story_arc_credits || [])[0] || {}).name || '';
+    } catch (err) { /* one missing answer should not stop the import */ }
   }
+  if (stale(run)) return;
+  const arcOf = (r) => typedArc || (autoArc ? r.foundArc || '' : '');
   const withSeries = hasSeries();
-  const rows = chosen.map((r) => ({
+  const rows = picked.filter((r) => !r.existing).map((r) => ({
     id: crypto.randomUUID(),
-    title: S.fromSeries ? `${series} #${r.number}` : r.title,
+    title: `${seriesOf(r)} #${r.number}`,
     author: r.author || 'Unknown',
     pub_year: /^\d{4}/.test(r.date) ? Number(r.date.slice(0, 4)) : null,
     pages: null, duration: null, language: 'English', format: 'Book',
@@ -329,21 +369,32 @@ async function runImport() {
     description: [r.name, r.about].filter(Boolean).join('\n\n') || null,
     genres: ['Comics'], copies, finished_at: null, isbn: null,
     cover_url: r.cover || null, cover_path: null,
-    ...(withSeries ? { series, series_no: r.seriesNo } : {}),
+    ...(withSeries ? { series: seriesOf(r), series_no: r.seriesNo } : {}),
+    ...(arcs ? { arc: arcOf(r) || null, arc_no: arcOf(r) ? r.arcNo : null } : {}),
   }));
+  // Issues already on the shelf: add only what they lack. Their title, status and everything else stay as they are.
+  const updates = picked.filter((r) => r.existing).map((r) => {
+    const patch = {};
+    if (r.needsCover) patch.cover_url = r.cover;
+    if (arcs && !r.existing.arc && arcOf(r)) { patch.arc = arcOf(r); patch.arc_no = r.arcNo; }
+    if (withSeries && !r.existing.series) { patch.series = seriesOf(r); patch.series_no = r.seriesNo; }
+    return { id: r.existing.id, patch };
+  }).filter((u) => Object.keys(u.patch).length);
   tick('Saving…', 1, 1);
   try {
     const saved = rows.length ? await importBooks(rows) : 0;
-    let covered = 0;
-    for (const r of covers) {
+    let updated = 0;
+    for (const u of updates) {
       if (stale(run)) break;
-      tick(`Adding covers: ${covered + 1} of ${covers.length}`, covered, covers.length);
-      await patchBook(r.existing.id, { cover_url: r.cover });
-      covered += 1;
+      tick(`Updating issues you already had: ${updated + 1} of ${updates.length}`, updated, updates.length);
+      await patchBook(u.id, u.patch);
+      updated += 1;
     }
     await hooks.refresh();
     const unknown = rows.filter((r) => r.author === 'Unknown').length;
-    show('Done', `<div class="imp-center"><p><b>${[saved ? `${plural(saved, 'issue', 'issues')} added${withSeries ? ` to “${esc(series)}”` : ''}` : '', covered ? `${plural(covered, 'cover', 'covers')} added to issues you already had` : ''].filter(Boolean).join(', and ')}</b>.</p>
+    const arcNames = [...new Set([...rows.map((r) => r.arc), ...updates.map((u) => u.patch.arc)].filter(Boolean))];
+    show('Done', `<div class="imp-center"><p><b>${[saved ? `${plural(saved, 'issue', 'issues')} added` : '', updated ? `${plural(updated, 'issue', 'issues')} you already had updated` : ''].filter(Boolean).join(', and ') || 'Nothing needed changing'}</b>.</p>
+      ${arcNames.length ? `<p class="hint">Story ${arcNames.length === 1 ? 'arc' : 'arcs'}: ${esc(arcNames.slice(0, 8).join(', '))}${arcNames.length > 8 ? '…' : ''}</p>` : ''}
       ${unknown ? `<p class="hint">${plural(unknown, 'issue has', 'issues have')} no writer on Comic Vine and were saved as “Unknown”.</p>` : ''}
       ${saved ? '<p class="hint">Issues marked Read have no finish date. Add one in the book form if you want them in the yearly stats.</p>' : ''}</div>`,
     '<button class="btn" type="button" id="cv-more">Import more</button><button class="btn primary" type="button" id="cv-done">Done</button>');
@@ -359,7 +410,7 @@ async function runImport() {
 export function openComics(h) {
   hooks = h;
   stopped = false;
-  S = { query: '', results: null, rows: [], series: '', run: 0 };
+  S = { query: '', results: null, rows: [], series: '', run: 0, page: 0, total: 0, kind: 'volume,story_arc' };
   if (!dlg().dataset.cvBound) { dlg().dataset.cvBound = '1'; dlg().addEventListener('close', () => { stopped = true; }); }
   if (getKey()) stepSearch(); else stepKey();
 }

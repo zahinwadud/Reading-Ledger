@@ -376,6 +376,8 @@ function onAuthor(btn) {
 // ====================================================================
 export const SERIES_SQL = `alter table public.books add column if not exists series text;
 alter table public.books add column if not exists series_no numeric;`;
+export const ARC_SQL = `alter table public.books add column if not exists arc text;
+alter table public.books add column if not exists arc_no numeric;`;
 const seriesOff = new Set();          // book ids unticked in the list
 const seriesComics = new Map();       // series name -> true/false: also give these titles the genre "Comics"
 const isComic = (b) => (b.genres || []).some((g) => /comic|manga|graphic novel/i.test(g));
@@ -390,6 +392,11 @@ function series() {
     $('series-copy').addEventListener('click', () => { navigator.clipboard.writeText(SERIES_SQL).then(() => hooks.toast('Copied'), () => hooks.toast('Could not copy. Select the text and copy it by hand.', true)); });
     return;
   }
+  // Comics have one more level, the story arc. It needs its own two columns.
+  const arcStep = hooks.hasArc() ? '' : `<div class="tl-opt"><b>Story arcs for comics</b>
+      <p class="hint">A comic issue can also belong to a story arc (Batman #608 is part of \u201cHush\u201d). To switch that on, run these two lines in Supabase (SQL Editor \u2192 New query), then reload this page.</p>
+      <pre class="tl-code">${esc(ARC_SQL)}</pre>
+      <div class="tl-acts"><button class="btn" type="button" id="arc-copy">Copy the two lines</button></div></div>`;
   const found = seriesFound();
   const bySeries = new Map();
   found.forEach((x) => { if (!bySeries.has(x.found.series)) bySeries.set(x.found.series, []); bySeries.get(x.found.series).push(x); });
@@ -404,8 +411,10 @@ function series() {
     </section>`).join('');
   show('Series', `<p>${found.length ? `${plural(found.length, 'title carries', 'titles carry')} a series name and number inside the title. Ticked titles get the series and number filled in.` : 'No series names found inside titles. You can set a series in each book’s form, or tick books in the list and use Change → Series.'}</p>
     ${found.length ? `<label class="imp-opt tl-opt"><input type="checkbox" id="series-clean" checked><span>Also remove the series text from the title<span class="hint">“ছায়াশ্বাপদ (তিন গোয়েন্দা, #৪)” becomes “ছায়াশ্বাপদ”. Titles like “Teen Titans #12” stay as they are.</span></span></label>` : ''}
+    ${arcStep}
     <div id="series-prog" class="imp-center" hidden><p id="series-msg"></p><div class="progress"><i id="series-bar"></i></div></div>
     ${html}`, found.length ? '<button class="btn primary" type="button" data-series="apply">Fill in the ticked titles</button>' : '');
+  if ($('arc-copy')) $('arc-copy').addEventListener('click', () => { navigator.clipboard.writeText(ARC_SQL).then(() => hooks.toast('Copied'), () => hooks.toast('Could not copy. Select the text and copy it by hand.', true)); });
 }
 
 function onSeriesTick(box) {
