@@ -116,8 +116,8 @@ function stepKey(message = '') {
 // ---------- step 2: search ----------
 function stepSearch(message = '') {
   show('Import comics', `
-    <p style="margin-top:0">Search for a series (like <i>Batman</i>) or a story arc (like <i>Batman: Hush</i>).</p>
-    <form id="cv-form" class="genre-add"><input id="cv-q" type="search" placeholder="Series or story arc" autocomplete="off" aria-label="Series or story arc" value="${esc(S.query || '')}"><button class="btn primary" type="submit">Search</button></form>
+    <p style="margin-top:0">Search for a series (like <i>Batman</i>) or a story arc (like <i>Hush</i>). You can also paste the address of its page on comicvine.gamespot.com.</p>
+    <form id="cv-form" class="genre-add"><input id="cv-q" type="search" placeholder="Series, story arc, or a Comic Vine address" autocomplete="off" aria-label="Series, story arc, or a Comic Vine address" value="${esc(S.query || '')}"><button class="btn primary" type="submit">Search</button></form>
     <div class="chipgroup cv-kind" role="group" aria-label="Look for">${[['volume,story_arc', 'Everything'], ['volume', 'Series only'], ['story_arc', 'Story arcs only']].map(([v, t]) => `<button type="button" class="chip" data-kind="${v}" aria-pressed="${(S.kind || 'volume,story_arc') === v}">${t}</button>`).join('')}</div>
     <p class="err" role="alert">${esc(message)}</p>
     <div id="cv-results" class="imp-list">${resultsHtml()}</div>`,
@@ -159,6 +159,10 @@ async function search(more = false) {
   if (!q) return;
   if (!more || q !== S.query) { S.results = null; S.page = 0; S.total = 0; more = false; }
   S.query = q;
+  // A pasted Comic Vine address (or its code, like 4045-40875) opens that series or story arc directly.
+  const code = q.match(/\b(4045|4050)-(\d+)\b/);
+  if (code) { openByCode(code[1], code[2]); return; }
+  if (S.kind === 'story_arc') { searchArcs(q); return; }
   if (more) { const btn = $('cv-more-results'); if (btn) { btn.disabled = true; btn.textContent = 'Loading\u2026'; } }
   else $('cv-results').innerHTML = '<p class="hint">Searching\u2026</p>';
   try {
@@ -175,6 +179,45 @@ async function search(more = false) {
     // On the first page, series with the most issues come first, then story arcs; later pages are added below.
     if (!more) S.results.sort((a, b) => (a.arc ? 1 : 0) - (b.arc ? 1 : 0) || b.count - a.count);
     if (!stopped) $('cv-results').innerHTML = resultsHtml();
+  } catch (err) { if (!stopped) stepSearch(err.message); }
+}
+
+// Story arcs are looked up by name in Comic Vine's list of arcs, which is more dependable than its general
+// search for them. An arc is often filed as "Batman: Hush", so when the whole text finds nothing, each word
+// is tried on its own and the arcs that contain the most of your words come first.
+async function searchArcs(q) {
+  $('cv-results').innerHTML = '<p class="hint">Searching story arcs\u2026</p>';
+  const words = [...new Set(q.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3))];
+  const tries = [...new Set([q, ...words.slice().sort((a, b) => b.length - a.length)])].slice(0, 4);
+  const found = new Map();
+  try {
+    for (let i = 0; i < tries.length; i += 1) {
+      const data = await cv('story_arcs', { filter: `name:${tries[i]}`, limit: '100', field_list: 'id,name,deck,image,publisher' });
+      (data.results || []).forEach((r) => found.set(r.id, r));
+      if (stopped || S.query !== q) return;
+      if (i === 0 && found.size) break;                    // the whole text matched: no need to try word by word
+    }
+    const score = (r) => words.filter((w) => String(r.name || '').toLowerCase().includes(w)).length;
+    S.results = [...found.values()].sort((a, b) => score(b) - score(a) || String(a.name).length - String(b.name).length).slice(0, 100).map((r) => ({
+      id: r.id, arc: true, name: r.name || '', year: '', count: 0, publisher: (r.publisher && r.publisher.name) || '', deck: plainText(r.deck, 140), thumb: imageOf(r.image, 'thumb'),
+    }));
+    S.total = S.results.length;
+    $('cv-results').innerHTML = S.results.length ? resultsHtml()
+      : '<p class="hint">No story arc with that name. Try one word of it, or open the arc on comicvine.gamespot.com and paste its address here.</p>';
+  } catch (err) { if (!stopped) stepSearch(err.message); }
+}
+
+// "4045-40875" is a story arc, "4050-796" a series (Comic Vine's own codes, visible in its page addresses).
+async function openByCode(type, id) {
+  $('cv-results').innerHTML = '<p class="hint">Opening it on Comic Vine\u2026</p>';
+  try {
+    if (type === '4045') {
+      const r = (await cv(`story_arc/4045-${id}`, { field_list: 'id,name' })).results || {};
+      pick({ id: Number(id), arc: true, name: r.name || 'Story arc', count: 0 });
+    } else {
+      const r = (await cv(`volume/4050-${id}`, { field_list: 'id,name,start_year,count_of_issues' })).results || {};
+      pick({ id: Number(id), arc: false, name: r.name || 'Series', year: r.start_year || '', count: Number(r.count_of_issues) || 0 });
+    }
   } catch (err) { if (!stopped) stepSearch(err.message); }
 }
 
