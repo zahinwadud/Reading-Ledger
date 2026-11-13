@@ -122,6 +122,19 @@ export async function fetchShelf() {
   return rows.filter((r) => (seen.has(r.id) ? false : seen.add(r.id)));
 }
 
+// ---------- shared settings (the yearly reading goal) ----------
+// A tiny "settings" table holds values that should be the same on every device. Returns { key: value },
+// or null when the table has not been created yet (the goal is then kept per device instead).
+export async function fetchSettings() {
+  const res = await fetch(`${BASE}/rest/v1/settings?select=key,value`, {
+    headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+  });
+  if (!res.ok) return null;
+  const out = {};
+  (await res.json()).forEach((row) => { out[row.key] = row.value; });
+  return out;
+}
+
 // ---------- the saved copy of the shelf ----------
 // The last shelf that loaded is kept in this browser, so the next visit shows it at once (and it still
 // opens with no connection). The page then fetches the current shelf and redraws only if it changed.

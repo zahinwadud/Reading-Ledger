@@ -1,9 +1,10 @@
 // Dashboard: login, counts, book list, add/edit form with cover upload.
 import {
   configured, fetchBooks, coverOf, ytId, ytThumb, saveBook, deleteBook, uploadCover, removeCover,
-  signIn, signOut, getSession, onAuth, esc, norm, initTheme, STATUS, OWN,
+  updateBooks, signIn, signOut, getSession, onAuth, esc, norm, initTheme, STATUS, OWN,
 } from './api.js';
 import { initImport } from './import.js';
+import { initTools, openTool } from './tools.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -16,6 +17,7 @@ const ICON = {
   bookmark: svg('<path d="M4.5 2.5h7v11L8 10.7 4.5 13.5z"/>'),
   phones: svg('<path d="M2.5 10V8a5.5 5.5 0 0 1 11 0v2"/><rect x="2" y="9.5" width="3" height="4.5" rx="1.2"/><rect x="11" y="9.5" width="3" height="4.5" rx="1.2"/>'),
   edit: svg('<path d="M3 13l.7-3L11 2.7a1.4 1.4 0 0 1 2 0l.3.3a1.4 1.4 0 0 1 0 2L6 12.3z"/><path d="M9.8 3.9l2.3 2.3"/>'),
+  eye: svg('<path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/>'),
   trash: svg('<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8h5.8l.6-8M7 7v3.5M9 7v3.5"/>'),
   hardcopy: svg('<path d="M4 2.5h7.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4z"/><path d="M4 2.5A1.5 1.5 0 0 0 2.5 4v8A1.5 1.5 0 0 0 4 13.5"/><path d="M6.5 5.5h4"/>'),
   ebook: svg('<rect x="3.5" y="1.8" width="9" height="12.4" rx="1.6"/><path d="M7 12h2"/>'),
@@ -77,6 +79,26 @@ async function showDash() {
   $('login').hidden = true;
   $('dash').hidden = false;
   await refresh();
+  openFromLink();
+}
+
+// The public site's "Edit" button opens admin.html#edit=<book id>: go straight to that book's form,
+// and return to the book's page when the form is saved or closed.
+let returnTo = '';
+function openFromLink() {
+  if (location.hash === '#goal') { history.replaceState(null, '', location.pathname + location.search); openTool('goal'); return; }
+  const m = location.hash.match(/^#edit=(.+)$/);
+  if (!m) return;
+  history.replaceState(null, '', location.pathname + location.search);   // use the link once
+  const book = books.find((b) => String(b.id) === decodeURIComponent(m[1]));
+  if (!book) { toast('That book was not found. It may have been deleted.', true); return; }
+  openPanel(book);
+  returnTo = String(book.id);
+}
+function goBackToBook() {
+  if (!returnTo) return false;
+  location.href = `./#/book/${encodeURIComponent(returnTo)}`;
+  return true;
 }
 
 $('login-form').addEventListener('submit', async (e) => {
@@ -104,36 +126,82 @@ async function refresh() {
   catch (err) { $('list-msg').textContent = ''; handleErr(err); }
 }
 
-function renderAll() { renderStats(); renderRows(); }
+function renderAll() { renderStats(); renderRows(); renderBulk(); }
 
-// [full label, short label for small phones, count]
+// Has the database got the "series" columns yet? (They are added by a small SQL snippet: Tools > Series.)
+const hasSeries = () => books.length > 0 && 'series' in books[0];
+
+// The count cards. Reading / Read / To read count books, and audiobooks have their own card, exactly
+// like the public site. Clicking a card filters the list to it.
+// [full label, short label for small phones, test, status filter, format filter]
+const STATS = [
+  ['Total books', 'Total', () => true, '', ''],
+  ['Currently Reading', 'Reading', (b) => b.format === 'Book' && b.status === 'reading', 'reading', 'Book'],
+  ['Read', 'Read', (b) => b.format === 'Book' && b.status === 'read', 'read', 'Book'],
+  ['Want to Read', 'To read', (b) => b.format === 'Book' && b.status === 'want', 'want', 'Book'],
+  ['Audiobooks', 'Audio', (b) => b.format === 'Audiobook', '', 'Audiobook'],
+];
 function renderStats() {
-  const c = (f) => books.filter(f).length;
-  const items = [
-    ['Total books', 'Total', books.length],
-    ['Currently Reading', 'Reading', c((b) => b.status === 'reading')],
-    ['Read', 'Read', c((b) => b.status === 'read')],
-    ['Want to Read', 'To read', c((b) => b.status === 'want')],
-    ['Audiobooks', 'Audio', c((b) => b.format === 'Audiobook')],
-  ];
-  $('stats').innerHTML = items.map(([full, short, n]) =>
-    `<div class="stat"><b>${n}</b><span class="l-full">${full}</span><span class="l-short" aria-hidden="true">${short}</span></div>`).join('');
+  const plain = !$('s').value && !$('fl').value && !$('fm').value;
+  $('stats').innerHTML = STATS.map(([full, short, test, st, fmt], i) => {
+    const on = plain && $('sf').value === st && $('ff').value === fmt;
+    return `<button type="button" class="stat" data-stat="${i}" aria-pressed="${on}"><b>${books.filter(test).length}</b><span class="l-full">${full}</span><span class="l-short" aria-hidden="true">${short}</span></button>`;
+  }).join('');
 }
+$('stats').addEventListener('click', (e) => {
+  const card = e.target.closest('[data-stat]');
+  if (!card) return;
+  const [, , , st, fmt] = STATS[Number(card.dataset.stat)];
+  $('s').value = ''; $('fl').value = ''; $('fm').value = '';
+  $('sf').value = st; $('ff').value = fmt;
+  filtersChanged();
+});
 
 // A big library is shown 100 at a time (drawing thousands of rows would make phones slow).
 const PAGE_SIZE = 100;
 let listLimit = PAGE_SIZE;
 
-function renderRows() {
+// ----- which books the list shows, and in what order -----
+const collator = new Intl.Collator(['bn', 'en'], { numeric: true, sensitivity: 'base' });
+const MISSING = {
+  genre: (b) => !(b.genres || []).length,
+  finished: (b) => b.status === 'read' && !b.finished_at,
+  year: (b) => !b.pub_year,
+  pages: (b) => b.format === 'Book' && !b.pages,
+  series: (b) => !b.series,
+};
+const ORDER = {
+  title: (a, b) => collator.compare(a.title, b.title),
+  author: (a, b) => collator.compare(a.author, b.author) || collator.compare(a.title, b.title),
+  finished: (a, b) => (b.finished_at ? 1 : 0) - (a.finished_at ? 1 : 0) || String(b.finished_at || '').localeCompare(String(a.finished_at || '')),
+};
+function matching() {
   const q = norm($('s').value);
-  const st = $('sf').value;
+  const st = $('sf').value, fmt = $('ff').value, lang = $('fl').value, miss = MISSING[$('fm').value];
   const list = books.filter((b) =>
-    (!st || (st === 'nocover' ? !coverOf(b) : b.status === st)) && (!q || norm(b.title).includes(q) || norm(b.author).includes(q)));
+    (!st || (st === 'nocover' ? !coverOf(b) && !(b.format === 'Audiobook' && b.youtube_url) : b.status === st)) &&
+    (!fmt || b.format === fmt) && (!lang || b.language === lang) && (!miss || miss(b)) &&
+    (!q || norm(b.title).includes(q) || norm(b.author).includes(q) || norm(b.series).includes(q)));
+  const order = ORDER[$('fo').value];
+  return order ? list.sort(order) : list;                 // books arrive newest first already
+}
+
+// ----- ticked books (for changing many at once) -----
+const picked_ids = new Set();
+
+// The reading status is a small menu right in the list: change it without opening the form.
+const quickStatus = (b) => `<select class="qs st-${esc(b.status)}" data-qs="${esc(b.id)}" aria-label="Reading status of ${esc(b.title)}">${
+  Object.entries(STATUS).map(([k, label]) => `<option value="${k}"${k === b.status ? ' selected' : ''}>${label}</option>`).join('')}</select>`;
+
+function renderRows() {
+  const list = matching();
   const matches = list.length;
   list.length = Math.min(list.length, listLimit);     // draw only the first batch
+  const pick = (b) => `<input type="checkbox" class="pickbox" data-pick="${esc(b.id)}" aria-label="Select ${esc(b.title)}"${picked_ids.has(String(b.id)) ? ' checked' : ''}>`;
   const actions = (b) => `
         <button class="btn" type="button" data-act="edit" data-id="${esc(b.id)}">${ICON.edit}Edit</button>
-        <button class="btn danger" type="button" data-act="del" data-id="${esc(b.id)}">${ICON.trash}Delete</button>`;
+        <a class="btn" href="./#/book/${esc(b.id)}" aria-label="View ${esc(b.title)} on the site" title="View on the site">${ICON.eye}<span class="view-l">View</span></a>`;
+  const seriesLine = (b) => (b.series ? `<span class="in-series">${esc(b.series)}${b.series_no != null ? ' #' + esc(b.series_no) : ''}</span>` : '');
   const info = (b) => {
     const audio = b.format === 'Audiobook';
     return {
@@ -146,16 +214,17 @@ function renderRows() {
   $('rows').innerHTML = list.map((b) => {
     const { audio, bn, url } = info(b);
     return `<tr>
+      <td class="pick">${pick(b)}</td>
       <td><div class="thumb${audio ? ' wide' : ''}">${url ? `<img src="${esc(url)}" alt="" loading="lazy">` : ''}</div></td>
-      <td class="${bn}">${esc(b.title)}</td>
+      <td class="${bn}">${esc(b.title)}${seriesLine(b)}</td>
       <td class="${bn}">${esc(b.author)}</td>
       <td>${esc(b.format)}</td>
-      <td>${statusBadge(b)}</td>
+      <td>${quickStatus(b)}</td>
       <td>${badge(b)}</td>
       <td class="acts">${actions(b)}
       </td></tr>`;
   }).join('');
-  // Phones: one card per book (cover, title, author, tags, then big Edit / Delete buttons).
+  // Phones: one card per book (cover, title, author, tags, then big Edit / View buttons).
   $('cards').innerHTML = list.map((b) => {
     const { audio, bn, url } = info(b);
     return `<article class="bcard">
@@ -163,13 +232,14 @@ function renderRows() {
         <div class="thumb${audio ? ' wide' : ''}">${url ? `<img src="${esc(url)}" alt="" loading="lazy">` : ''}</div>
         <div class="bc-info">
           <h3 class="bc-title ${bn}">${esc(b.title)}</h3>
-          <p class="bc-author ${bn}">${esc(b.author)}</p>
+          <p class="bc-author ${bn}">${esc(b.author)}${seriesLine(b)}</p>
           <div class="bc-tags">
             <span class="badge fmt">${audio ? ICON.phones : ICON.book}${esc(b.format)}</span>
-            ${statusBadge(b)}
+            ${quickStatus(b)}
             ${badge(b)}
           </div>
         </div>
+        ${pick(b)}
       </div>
       <div class="bc-actions">${actions(b)}
       </div>
@@ -182,11 +252,17 @@ function renderRows() {
     $('more-text').textContent = `Showing ${list.length.toLocaleString()} of ${matches.toLocaleString()}`;
     $('more-btn').textContent = `Show ${Math.min(PAGE_SIZE, more)} more`;
   }
-  $('list-msg').textContent = list.length ? '' :
-    (books.length ? 'No books match your search.' : 'No books yet. Use \u201cAdd book\u201d (the + button) to add your first one.');
+  $('list-msg').textContent = list.length ? (matches < books.length ? `${matches.toLocaleString()} of ${books.length.toLocaleString()} books match.` : '') :
+    (books.length ? 'No books match your search.' : 'No books yet. Use “Add book” (the + button) to add your first one.');
+  $('clear-filters').hidden = !($('s').value || $('sf').value || $('ff').value || $('fl').value || $('fm').value);
+  $('pick-all').checked = matches > 0 && matching().every((b) => picked_ids.has(String(b.id)));
 }
 
-$('s').addEventListener('input', () => { listLimit = PAGE_SIZE; renderRows(); });
+function filtersChanged() { listLimit = PAGE_SIZE; renderStats(); renderRows(); renderBulk(); }
+['sf', 'ff', 'fl', 'fm', 'fo'].forEach((id) => $(id).addEventListener('change', filtersChanged));
+$('clear-filters').addEventListener('click', () => { ['s', 'sf', 'ff', 'fl', 'fm'].forEach((id) => { $(id).value = ''; }); filtersChanged(); });
+
+$('s').addEventListener('input', filtersChanged);
 
 // A shorter hint on phones, so it is not cut off in the narrow search box.
 const phoneQuery = matchMedia('(max-width: 760px)');
@@ -205,22 +281,134 @@ window.addEventListener('scroll', () => {
   else if (y < lastY - 6) bar.classList.remove('away');
   lastY = y;
 }, { passive: true });
-$('sf').addEventListener('change', () => { listLimit = PAGE_SIZE; renderRows(); });
 $('more-btn').addEventListener('click', () => { listLimit += PAGE_SIZE; renderRows(); });
 
-async function onRowAction(e) {
+function onRowAction(e) {
   const btn = e.target.closest('button[data-act]');
   if (!btn) return;
   const book = books.find((b) => String(b.id) === btn.dataset.id);
-  if (!book) return;
-  if (btn.dataset.act === 'edit') { openPanel(book); return; }
-  if (!confirm(`Delete \u201c${book.title}\u201d? This also removes its cover image.`)) return;
-  btn.disabled = true;
-  try { await deleteBook(book); toast('Book deleted'); await refresh(); }
-  catch (err) { btn.disabled = false; handleErr(err); }
+  if (book) openPanel(book);
 }
 $('rows').addEventListener('click', onRowAction);
 $('cards').addEventListener('click', onRowAction);
+
+// ----- quick status change, straight from the list -----
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+async function onQuickStatus(e) {
+  const sel = e.target.closest('[data-qs]');
+  if (!sel) return;
+  const book = books.find((b) => String(b.id) === sel.dataset.qs);
+  if (!book || sel.value === book.status) return;
+  const patch = { status: sel.value };
+  if (sel.value === 'read' && !book.finished_at) patch.finished_at = today();     // finished today, unless a date is already there
+  sel.disabled = true;
+  try {
+    const row = await saveBook(patch, book.id);
+    Object.assign(book, row || patch);
+    toast(`“${book.title}” is now ${STATUS[book.status]}${patch.finished_at ? ' (finished today)' : ''}`);
+    renderAll();
+  } catch (err) { sel.value = book.status; sel.disabled = false; handleErr(err); }
+}
+$('rows').addEventListener('change', onQuickStatus);
+$('cards').addEventListener('change', onQuickStatus);
+
+// ----- tick books, then change them all at once -----
+function onPick(e) {
+  const box = e.target.closest('[data-pick]');
+  if (!box) return;
+  if (box.checked) picked_ids.add(box.dataset.pick); else picked_ids.delete(box.dataset.pick);
+  document.querySelectorAll(`[data-pick="${CSS.escape(box.dataset.pick)}"]`).forEach((el) => { el.checked = box.checked; });   // table + card copy
+  renderBulk();
+}
+$('rows').addEventListener('change', onPick);
+$('cards').addEventListener('change', onPick);
+function pickAll(on) {
+  matching().forEach((b) => { if (on) picked_ids.add(String(b.id)); else picked_ids.delete(String(b.id)); });
+  renderRows(); renderBulk();
+}
+$('pick-all').addEventListener('change', (e) => pickAll(e.target.checked));
+$('bulk-all').addEventListener('click', () => pickAll(true));
+$('bulk-clear').addEventListener('click', () => { picked_ids.clear(); renderRows(); renderBulk(); });
+
+const allGenres = () => {
+  const all = [];
+  [...GENRES, ...books.flatMap((b) => b.genres || [])].forEach((g) => { if (!all.some((x) => sameGenre(x, g))) all.push(g); });
+  return all;
+};
+const options = (pairs) => pairs.map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join('');
+// The control for the new value depends on what is being changed.
+const BULK_INPUT = {
+  'genre-add': () => `<input id="bulk-v" type="text" list="bulk-genres" placeholder="Genre" aria-label="Genre to add"><datalist id="bulk-genres">${allGenres().map((g) => `<option value="${esc(g)}">`).join('')}</datalist>`,
+  'genre-remove': () => {
+    const used = [...new Set(books.filter((b) => picked_ids.has(String(b.id))).flatMap((b) => b.genres || []))];
+    return used.length ? `<select id="bulk-v" aria-label="Genre to remove">${options(used.map((g) => [g, g]))}</select>` : '<span class="hint">The ticked books have no genres.</span>';
+  },
+  status: () => `<select id="bulk-v" aria-label="New reading status">${options(Object.entries(STATUS))}</select>`,
+  ownership: () => `<select id="bulk-v" aria-label="New ownership">${options(Object.entries(OWN))}</select>`,
+  language: () => `<select id="bulk-v" aria-label="New language">${options([['English', 'English'], ['Bengali', 'Bengali']])}</select>`,
+  copies: () => `<select id="bulk-v" aria-label="Copies I have">${options([['hardcopy', 'Hardcopy'], ['ebook', 'Ebook'], ['hardcopy,ebook', 'Hardcopy and Ebook'], ['', 'None']])}</select>`,
+  series: () => (hasSeries()
+    ? `<input id="bulk-v" type="text" list="series-list" placeholder="Series name (empty removes it)" aria-label="Series name">`
+    : '<span class="hint">Set up series first: Tools → Series.</span>'),
+};
+function renderBulk() {
+  [...picked_ids].forEach((id) => { if (!books.some((b) => String(b.id) === id)) picked_ids.delete(id); });   // deleted meanwhile
+  const n = picked_ids.size;
+  $('bulkbar').hidden = n === 0;
+  document.body.classList.toggle('bulk-on', n > 0);
+  if (!n) { $('bulk-action').value = ''; $('bulk-value').innerHTML = ''; return; }
+  $('bulk-count').textContent = `${n.toLocaleString()} selected`;
+  const total = matching().length;
+  $('bulk-all').textContent = `Select all ${total.toLocaleString()}`;
+  $('bulk-all').hidden = matching().every((b) => picked_ids.has(String(b.id)));
+  $('bulk-apply').disabled = !$('bulk-v');
+}
+$('bulk-action').addEventListener('change', () => {
+  const make = BULK_INPUT[$('bulk-action').value];
+  $('bulk-value').innerHTML = make ? make() : '';
+  $('bulk-apply').disabled = !$('bulk-v');
+  if ($('bulk-v')) $('bulk-v').focus();
+});
+
+// Work out the change for each ticked book, then save books that end up with the same values together.
+$('bulk-apply').addEventListener('click', async () => {
+  const action = $('bulk-action').value;
+  const input = $('bulk-v');
+  if (!action || !input) return;
+  const value = input.value.replace(/\s+/g, ' ').trim();
+  let chosen = books.filter((b) => picked_ids.has(String(b.id)));
+  let patchOf;
+  if (action === 'genre-add') {
+    if (!value) { toast('Type the genre to add.', true); return; }
+    const genre = allGenres().find((g) => sameGenre(g, value)) || value.slice(0, 40);
+    chosen = chosen.filter((b) => !(b.genres || []).some((g) => sameGenre(g, genre)));
+    patchOf = (b) => ({ genres: [...(b.genres || []), genre] });
+  } else if (action === 'genre-remove') {
+    chosen = chosen.filter((b) => (b.genres || []).some((g) => sameGenre(g, value)));
+    patchOf = (b) => ({ genres: b.genres.filter((g) => !sameGenre(g, value)) });
+  } else if (action === 'copies') {
+    chosen = chosen.filter((b) => b.format === 'Book');       // audiobooks have no hardcopy / ebook
+    patchOf = () => ({ copies: value ? value.split(',') : [] });
+  } else if (action === 'series') {
+    patchOf = () => (value ? { series: value } : { series: null, series_no: null });
+  } else {
+    chosen = chosen.filter((b) => b[action] !== value);
+    patchOf = () => ({ [action]: value });
+  }
+  if (!chosen.length) { toast('Nothing to change: the ticked books already have that.'); return; }
+  const label = $('bulk-action').selectedOptions[0].textContent;
+  if (!confirm(`${label}: change ${chosen.length} ${chosen.length === 1 ? 'book' : 'books'}?`)) return;
+  const groups = new Map();
+  chosen.forEach((b) => { const patch = patchOf(b); const key = JSON.stringify(patch); if (!groups.has(key)) groups.set(key, { patch, ids: [] }); groups.get(key).ids.push(b.id); });
+  const btn = $('bulk-apply');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    for (const g of groups.values()) await updateBooks(g.ids, g.patch);
+    toast(`${chosen.length} ${chosen.length === 1 ? 'book' : 'books'} changed`);
+    picked_ids.clear();
+  } catch (err) { handleErr(err); }
+  finally { btn.textContent = 'Apply'; await refresh(); }
+});
 
 // ---------- copies I have: Hardcopy, Ebook or both (books only; shown on the book page only) ----------
 const COPIES = [['hardcopy', 'Hardcopy'], ['ebook', 'Ebook']];
@@ -273,6 +461,12 @@ const dlg = $('panel');
 const FIELDS = ['title', 'author', 'year', 'language', 'format', 'pages', 'duration', 'status', 'ownership', 'youtube', 'description'];
 
 function syncStatus() { $('g-finished').hidden = $('f-status').value !== 'read'; }
+// "4", "4.5" or Bengali digits ("৪") -> a number, or null when empty / not a number.
+const BN_DIGITS = '\u09e6\u09e7\u09e8\u09e9\u09ea\u09eb\u09ec\u09ed\u09ee\u09ef';
+function seriesNumber(text) {
+  const t = String(text ?? '').trim().replace(/[\u09e6-\u09ef]/g, (d) => BN_DIGITS.indexOf(d));
+  return /^\d+(\.\d+)?$/.test(t) ? Number(t) : null;
+}
 $('f-status').addEventListener('change', syncStatus);
 
 function syncFormat() {
@@ -323,6 +517,12 @@ function openPanel(book) {
   $('f-status').value = b.status;
   $('f-ownership').value = b.ownership;
   $('f-finished').value = b.finished_at || '';
+  $('g-series').hidden = $('g-series-no').hidden = !hasSeries();
+  $('f-series').value = b.series || '';
+  $('f-series-no').value = b.series_no ?? '';
+  setErr('series-no', '');
+  $('series-list').innerHTML = [...new Set(books.map((x) => x.series).filter(Boolean))].sort(collator.compare).map((x) => `<option value="${esc(x)}">`).join('');
+  $('delete-book').hidden = !book;
   syncStatus();
   haveCopies = [...(b.copies || [])];
   renderCopies();
@@ -341,6 +541,7 @@ function openPanel(book) {
 $('add').addEventListener('click', () => openPanel(null));
 $('fab').addEventListener('click', () => openPanel(null));
 $('close-x').addEventListener('click', () => dlg.close());
+dlg.addEventListener('close', () => { goBackToBook(); });   // closed without saving after an Edit link: back to the book too
 $('cancel').addEventListener('click', () => dlg.close());
 
 // ----- cover: choose or drop, shrink to max 600px wide, compress -----
@@ -466,6 +667,7 @@ function validate() {
   if (year && !/^\d{4}$/.test(year)) bad('year', 'Enter a 4-digit year, like 2018.');
   const pages = $('f-pages').value.trim();
   if (!audio && pages && !/^[1-9]\d*$/.test(pages)) bad('pages', 'Pages must be a whole number above 0.');
+  if ($('f-series-no').value.trim() && seriesNumber($('f-series-no').value) === null) bad('series-no', 'Enter a number, like 4.');
   const yt = $('f-youtube').value.trim();
   if (audio && yt) {
     if (!ytId(yt)) bad('youtube', 'Paste a YouTube video link, like https://www.youtube.com/watch?v=\u2026 or https://youtu.be/\u2026');
@@ -491,8 +693,25 @@ function collect() {
     youtube_url: audio && val('youtube') ? val('youtube') : null,
     description: val('description') || null,
     finished_at: $('f-status').value === 'read' && $('f-finished').value ? $('f-finished').value : null,
+    ...(hasSeries() ? { series: val('series') || null, series_no: val('series') ? seriesNumber(val('series-no')) : null } : {}),
   };
 }
+
+// Delete lives inside the form (not in the list), so it cannot be tapped by accident.
+$('delete-book').addEventListener('click', async () => {
+  const book = editing;
+  if (!book || !confirm(`Delete \u201c${book.title}\u201d? This also removes its cover image.`)) return;
+  const btn = $('delete-book');
+  btn.disabled = true;
+  try {
+    await deleteBook(book);
+    if (returnTo) { location.href = './'; return; }          // came from the public site: the book page is gone
+    dlg.close();
+    toast('Book deleted');
+    await refresh();
+  } catch (err) { handleErr(err); }
+  finally { btn.disabled = false; }
+});
 
 $('book-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -509,6 +728,7 @@ $('book-form').addEventListener('submit', async (e) => {
     else data.cover_path = oldPath;
     await saveBook(data, editing ? editing.id : null);
     if (oldPath && (uploaded || removeFlag)) await removeCover(oldPath); // tidy the replaced file
+    if (goBackToBook()) return;            // came from the public site's Edit button: back to that book
     dlg.close();
     toast('Book saved');
     await refresh();
@@ -519,6 +739,7 @@ $('book-form').addEventListener('submit', async (e) => {
 });
 
 initImport({ getBooks: () => books, refresh, toast, statusBadge, badge });
+initTools({ getBooks: () => books, refresh, toast, handleErr, hasSeries, seriesNumber });
 
 // ---------- start ----------
 (async function boot() {

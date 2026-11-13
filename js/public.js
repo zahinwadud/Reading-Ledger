@@ -1,5 +1,5 @@
 // Public site: home rows, shelf pages, book detail, live search.
-import { configured, fetchShelf, readShelfCache, writeShelfCache, coverOf, ytThumb, esc, norm, initTheme, STATUS, OWN } from './core.js';
+import { configured, fetchShelf, fetchSettings, readShelfCache, writeShelfCache, coverOf, ytThumb, esc, norm, initTheme, STATUS, OWN } from './core.js';
 
 const app = document.getElementById('app');
 const qEl = document.getElementById('q');
@@ -7,8 +7,10 @@ initTheme(document.getElementById('theme'));
 
 let books = [];
 let state = configured ? 'loading' : 'setup'; // loading | ready | error | setup
-let filters = { lang: '', own: '', fmt: '', copies: '' };
-let lastPath = '';
+let filters = { lang: '', own: '', fmt: '', copies: '', type: '' };   // read from the address each time a page is drawn
+let sortKey = '';                                            // ditto ("?sort=title")
+let settings = null;     // shared settings from the database (null = that table is not set up, or not loaded yet)
+try { settings = JSON.parse(localStorage.getItem('rl-settings') || 'null'); } catch (e) { /* storage blocked */ }
 let offline = false;      // true while we are showing the saved copy because the fresh one could not load
 
 // ---------- small icons (inline SVG so nothing extra is downloaded) ----------
@@ -21,6 +23,9 @@ const ICON = {
   done: svg('<circle cx="8" cy="8" r="6"/><path d="M5.3 8.3l1.9 1.9 3.5-4"/>'),
   bookmark: svg('<path d="M4.5 2.5h7v11L8 10.7 4.5 13.5z"/>'),
   play: svg('<path d="M5 3v10l8-5z"/>'),
+  filter: svg('<path d="M2.5 4h11M4.5 8h7M6.5 12h3"/>'),
+  tick: svg('<path d="M3.5 8.5l3 3 6-6.5"/>'),
+  edit: svg('<path d="M3 13l.7-3L11 2.7a1.4 1.4 0 0 1 2 0l.3.3a1.4 1.4 0 0 1 0 2L6 12.3z"/><path d="M9.8 3.9l2.3 2.3"/>'),
   left: svg('<path d="M10 3L5 8l5 5"/>'),
   right: svg('<path d="M6 3l5 5-5 5"/>'),
   hardcopy: svg('<path d="M4 2.5h7.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4z"/><path d="M4 2.5A1.5 1.5 0 0 0 2.5 4v8A1.5 1.5 0 0 0 4 13.5"/><path d="M6.5 5.5h4"/>'),
@@ -39,6 +44,66 @@ const genreKey = (s) => String(s || '').toLowerCase().trim()
   .replace(/&/g, ' and ')          // keep "&" meaning: "Mystery & thriller" -> "mystery and thriller"
   .replace(/[^\w\u0980-\u09FF]+/g, '-')  // any run of non-word chars -> single hyphen
   .replace(/^-+|-+$/g, '');         // trim leading/trailing hyphens
+
+// ---------- the address: page + options ----------
+// "#/shelf/read?lang=Bengali&sort=title" -> parts ['shelf', 'read'] and options { lang, sort }.
+// Filters, sorting and the search text all live in the address, so a refresh, a shared link and the
+// Back button bring the same view back.
+const safeDecode = (text) => { try { return decodeURIComponent(text); } catch (e) { return text; } };
+function route() {
+  const [path, query = ''] = location.hash.replace(/^#\/?/, '').split('?');
+  return { path, parts: path.split('/').map(safeDecode), params: new URLSearchParams(query) };
+}
+// Change one option in the address without adding a step to the Back history.
+function setOption(name, value) {
+  const r = route();
+  if (value) r.params.set(name, value); else r.params.delete(name);
+  const query = r.params.toString();
+  history.replaceState(history.state, '', `#/${r.path}${query ? '?' + query : ''}`);
+  lastHash = location.hash;
+}
+
+// ---------- sorting ----------
+// Titles and names are compared the way a reader expects in both Bengali and English ("Book 2" before "Book 10").
+const collator = new Intl.Collator(['bn', 'en'], { numeric: true, sensitivity: 'base' });
+const byTitle = (a, b) => collator.compare(a.title, b.title);
+const byAdded = (a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''));
+// Finished date, newest first; books with no date go last (newest added first among themselves).
+const byFinished = (a, b) => (b.finished_at ? 1 : 0) - (a.finished_at ? 1 : 0)
+  || String(b.finished_at || '').localeCompare(String(a.finished_at || '')) || byAdded(a, b);
+const SORTS = {
+  added: ['Recently added', byAdded],
+  finished: ['Recently finished', byFinished],
+  title: ['Title', byTitle],
+  author: ['Author', (a, b) => collator.compare(a.author, b.author) || byTitle(a, b)],
+  newest: ['Year, newest first', (a, b) => (b.pub_year || -Infinity) - (a.pub_year || -Infinity) || byTitle(a, b)],
+  oldest: ['Year, oldest first', (a, b) => (a.pub_year || Infinity) - (b.pub_year || Infinity) || byTitle(a, b)],
+};
+// options = the sort keys this page offers; the first one is its default.
+function sortList(list, options) {
+  const key = options.includes(sortKey) ? sortKey : options[0];
+  return list.sort(SORTS[key][1]);
+}
+function sortSelect(options) {
+  const key = options.includes(sortKey) ? sortKey : options[0];
+  return `<label class="sortbox"><span class="cg-l">Sort by</span><select data-sort data-default="${options[0]}">${
+    options.map((k) => `<option value="${k}"${k === key ? ' selected' : ''}>${SORTS[k][0]}</option>`).join('')}</select></label>`;
+}
+const SORT_DEFAULT = ['added', 'title', 'author', 'newest', 'oldest'];
+const SORT_READ = ['finished', 'added', 'title', 'author', 'newest', 'oldest'];
+const SORT_AUTHOR = ['title', 'newest', 'oldest', 'added'];
+SORTS.series = ['Series order', (a, b) => (a.series_no ?? Infinity) - (b.series_no ?? Infinity) || byTitle(a, b)];
+const SORT_SERIES = ['series', 'title', 'newest', 'oldest'];
+const seriesHref = (name) => `#/series/${encodeURIComponent(name)}`;
+const inSeries = (name) => { const key = norm(name); return books.filter((b) => b.series && norm(b.series) === key); };
+
+// Is the owner signed in on this device? (The dashboard leaves its sign-in in the browser's storage.)
+// This only decides whether to show the "Edit" shortcut; the database still checks every change.
+function ownerHere() {
+  try { for (let i = 0; i < localStorage.length; i += 1) if (/^sb-.+-auth-token$/.test(localStorage.key(i))) return true; } catch (e) { /* storage blocked */ }
+  return false;
+}
+const authorHref = (name) => `#/author/${encodeURIComponent(name)}`;
 
 // ---------- shelves ----------
 // Reading-status shelves hold Books. Audiobooks have their own shelf. "All" shows everything.
@@ -63,10 +128,31 @@ function hash(text) {
   for (const ch of String(text || '')) h = (h * 31 + ch.codePointAt(0)) >>> 0;
   return h;
 }
+// A small emblem on the drawn cover, chosen from the book's genres (the first rule that matches wins).
+const MOTIFS = [
+  [/comic|manga|graphic/i, '<path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/>'],
+  [/mystery|thriller|detective|crime/i, '<circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2l3.3 3.3"/>'],
+  [/science fiction|sci-fi/i, '<circle cx="8" cy="8" r="3.2"/><path d="M2 10.6c1.6 1.2 5.2.5 8.3-1.3 3-1.8 4.8-4.2 3.7-5.3"/>'],
+  [/fantasy/i, '<path d="M8 2l1.4 4.600L14 8l-4.6 1.400L8 14l-1.4-4.600L2 8l4.6-1.400z"/>'],
+  [/horror|ghost/i, '<path d="M3.5 13.500V7.500a4.5 4.5 0 0 1 9 0v6l-1.5-1.2-1.5 1.200L8 12.300l-1.5 1.200L5 12.300z"/><path d="M6.5 7.500h.01M9.5 7.500h.01"/>'],
+  [/poetry|poem/i, '<path d="M13 2.500C8 3 4.5 6.5 3.5 13.500M13 2.500c0 4-2 7-6.5 7.500M3.5 13.500l2-3"/>'],
+  [/histor/i, '<path d="M4 2.500h8M4 13.500h8M5 2.500c0 3 6 3.5 6 5.500s-6 2.5-6 5.500M11 2.500c0 3-6 3.5-6 5.500s6 2.5 6 5.5"/>'],
+  [/biograph|memoir/i, '<circle cx="8" cy="5.5" r="2.7"/><path d="M3 13.500c.500-3 2.5-4.5 5-4.500s4.5 1.5 5 4.5"/>'],
+  [/romance/i, '<path d="M8 13.200S2.5 9.8 2.5 6.200A2.8 2.8 0 0 1 8 5a2.8 2.8 0 0 1 5.5 1.200c0 3.6-5.5 7-5.5 7z"/>'],
+  [/travel|adventure/i, '<circle cx="8" cy="8" r="5.5"/><path d="M10.3 5.700L9 9l-3.3 1.300L7 7z"/>'],
+  [/children|humou?r/i, '<circle cx="8" cy="8" r="5.5"/><path d="M5.8 9.300c.600.9 1.3 1.3 2.2 1.300s1.6-.400 2.2-1.300M6.2 6.500h.01M9.8 6.500h.01"/>'],
+  [/science|philosoph|psycholog/i, '<circle cx="8" cy="8" r="1.2"/><ellipse cx="8" cy="8" rx="6" ry="2.5"/><ellipse cx="8" cy="8" rx="6" ry="2.5" transform="rotate(60 8 8)"/><ellipse cx="8" cy="8" rx="6" ry="2.5" transform="rotate(120 8 8)"/>'],
+];
+function motif(b) {
+  const genres = (b.genres || []).join(' | ');
+  const hit = genres && MOTIFS.find(([test]) => test.test(genres));
+  return hit ? `<span class="gc-m">${svg(hit[1])}</span>` : '';
+}
+
 function genCover(b) {
   const hue = (hash(norm(b.author)) % 360 + (hash(norm(b.title)) % 25) - 12 + 360) % 360;
   const shade = hash(norm(b.title)) % 3;
-  return `<div class="gencover${b.format === 'Audiobook' ? ' wide' : ''}" data-s="${shade}" style="--h:${hue}" aria-hidden="true"><span class="gc-t ${lc(b)}">${esc(b.title)}</span><span class="gc-a ${lc(b)}">${esc(b.author)}</span></div>`;
+  return `<div class="gencover${b.format === 'Audiobook' ? ' wide' : ''}" data-s="${shade}" style="--h:${hue}" aria-hidden="true"><span class="gc-t ${lc(b)}">${esc(b.title)}</span><span class="gc-a ${lc(b)}">${esc(b.author)}</span>${motif(b)}</div>`;
 }
 
 function coverHtml(b, eager) {
@@ -104,17 +190,31 @@ function badge(b) {
 
 // Cards show cover, title and author only. The reading-status and ownership tags live on the book's
 // detail page (and in the dashboard). Pass withTags = true to bring them back on cards.
-function cardBase(b, withTags) {
-  return `<a class="card${b.format === 'Audiobook' ? ' wide' : ''}" href="#/book/${esc(b.id)}">
+function cardBase(b, withTags, extra = '', cls = '') {
+  return `<a class="card${b.format === 'Audiobook' ? ' wide' : ''}${cls}" href="#/book/${esc(b.id)}">
     ${coverHtml(b)}
     ${withTags ? `<p class="cstat">${statusBadge(b)}</p>` : ''}
     <h3 class="ct ${lc(b)}">${esc(b.title)}</h3>
     <p class="ca ${lc(b)}">${esc(b.author)}</p>
-    ${withTags ? badge(b) : ''}
+    ${withTags ? badge(b) : ''}${extra}
   </a>`;
 }
 const card = (b) => cardBase(b, false);
 const homeCard = (b) => cardBase(b, false);
+
+// "Do we have it?" in plain words, for search results and the copies pages.
+function haveLabel(b) {
+  if (b.format === 'Audiobook') return ['audio', 'Audiobook'];
+  const c = b.copies || [];
+  if (c.includes('hardcopy')) return ['shelf', c.includes('ebook') ? 'On our shelf \u00b7 also ebook' : 'On our shelf'];
+  if (c.includes('ebook')) return ['ebook', 'Ebook only'];
+  return b.ownership === 'owned' ? ['owned', 'Owned'] : ['none', 'Not owned \u00b7 want to buy'];
+}
+const haveCard = (b) => { const [k, t] = haveLabel(b); return cardBase(b, false, `<p class="chave have-${k}">${t}</p>`); };
+// In a series: the number on the cover, and a tick once it is read.
+const seriesCard = (b) => cardBase(b, false,
+  `${b.series_no != null ? `<span class="cno">#${esc(b.series_no)}</span>` : ''}${b.status === 'read' ? `<span class="ctick" role="img" aria-label="Read">${ICON.tick}</span>` : b.status === 'reading' ? '<span class="cnow">Reading</span>' : ''}`,
+  ' numbered');
 
 const stateBox = (html) => `<div class="wrap"><div class="state">${html}</div></div>`;
 const notFound = () => stateBox('<p>We couldn\u2019t find that page.</p><a class="btn primary" href="#/">Back to the shelf</a>');
@@ -136,8 +236,7 @@ function gridBlock(key, list, wide, cardFn, heading = '') {
 
 // Books (portrait covers) and audiobooks (wide thumbnails) never share one grid.
 // When a page has both, the audiobooks follow once every book is on screen.
-function gridHtml(list, withTags = false) {
-  const cardFn = withTags ? (b) => cardBase(b, true) : card;
+function gridHtml(list, cardFn = card) {
   const bk = list.filter((b) => b.format !== 'Audiobook');
   const au = list.filter((b) => b.format === 'Audiobook');
   if (bk.length && au.length) {
@@ -278,7 +377,7 @@ function statsHtml() {
     ['Audiobooks', shelf('audio'), '#/shelf/audio'],
     ['Hardcopy', c(b => (b.copies || []).includes('hardcopy')), '#/copies/hardcopy'],
     ['Ebook', c(b => (b.copies || []).includes('ebook')), '#/copies/ebook'],
-    ['Comics', c(isComics), '#/genre/comics'],
+    ['Comics', c(isComics), '#/comics'],
     ['Want to buy', shelf('buy'), '#/shelf/buy'],
   ];
 
@@ -340,40 +439,62 @@ function homePage() {
   return heroHtml() + `<div class="wrap">${statsHtml()}${rows}</div>`;
 }
 
-function chips(key) {
-  const showFormat = key === 'all' || key === 'buy';
-  const group = (id, label, opts) =>
-    `<div class="chipgroup" role="group" aria-label="${label}"><span class="cg-l">${label}</span>${
+// The filters every shelf-like page shares.
+const FILTER_LABELS = {
+  lang: ['Language', [['', 'All'], ['English', 'English'], ['Bengali', 'Bengali']]],
+  own: ['Ownership', [['', 'All'], ['owned', 'Owned'], ['buy', 'Want to Buy']]],
+  fmt: ['Format', [['', 'All'], ['Book', 'Books'], ['Audiobook', 'Audiobooks']]],
+  copies: ['Copies', [['', 'All'], ['hardcopy', 'Hardcopy'], ['ebook', 'Ebook']]],
+  type: ['Type', [['', 'All'], ['book', 'Books'], ['comic', 'Comics']]],
+};
+const passes = (b) =>
+  (!filters.lang || b.language === filters.lang) &&
+  (!filters.own || b.ownership === filters.own) &&
+  (!filters.fmt || b.format === filters.fmt) &&
+  (!filters.copies || (b.copies || []).includes(filters.copies)) &&
+  (!filters.type || (filters.type === 'comic') === isComics(b));
+
+// groups = which filters this page offers. On a phone they sit in a panel behind one "Filters" button
+// (with the ones in use shown as small removable chips); on a wide screen they are all in view.
+let filtersOpen = false;
+function chips(groups, sorts, count) {
+  const group = (id) => {
+    const [label, opts] = FILTER_LABELS[id];
+    return `<div class="chipgroup" role="group" aria-label="${label}"><span class="cg-l">${label}</span>${
       opts.map(([v, t]) => `<button type="button" class="chip" data-g="${id}" data-v="${v}" aria-pressed="${filters[id] === v}">${t}</button>`).join('')
     }</div>`;
-  return `<div class="filters">
-    ${group('lang', 'Language', [['', 'All'], ['English', 'English'], ['Bengali', 'Bengali']])}
-    ${key === 'buy' ? '' : group('own', 'Ownership', [['', 'All'], ['owned', 'Owned'], ['buy', 'Want to Buy']])}
-    ${showFormat ? group('fmt', 'Format', [['', 'All'], ['Book', 'Books'], ['Audiobook', 'Audiobooks']]) : ''}
-    ${group('copies', 'Copies', [['', 'All'], ['hardcopy', 'Hardcopy'], ['ebook', 'Ebook']])}
-  </div>`;
+  };
+  const active = groups.filter((id) => filters[id]);
+  const activeChips = active.map((id) => {
+    const text = (FILTER_LABELS[id][1].find(([v]) => v === filters[id]) || [])[1] || filters[id];
+    return `<button type="button" class="chip on" data-g="${id}" data-v="" aria-label="Remove filter: ${text}">${text} <span aria-hidden="true">\u00d7</span></button>`;
+  }).join('');
+  return `<div class="filters${filtersOpen ? ' open' : ''}">
+    <button type="button" class="btn filt-btn" data-filt="open" aria-expanded="${filtersOpen}">${ICON.filter}Filters${active.length ? `<span class="filt-n">${active.length}</span>` : ''}</button>
+    <div class="filt-sheet">
+      <div class="filt-head"><b>Filters</b>${active.length ? '<button type="button" class="btn" data-filt="clear">Clear all</button>' : ''}</div>
+      ${groups.map(group).join('')}
+      <button type="button" class="btn primary filt-done" data-filt="close">Show ${count} ${count === 1 ? 'title' : 'titles'}</button>
+    </div>
+    ${sortSelect(sorts)}
+    ${activeChips ? `<div class="filt-active">${activeChips}</div>` : ''}
+  </div><div class="filt-backdrop" data-filt="close"></div>`;
+}
+
+// "Open the app on this page": remembered on this device only (handy for a phone that mostly checks one shelf).
+function startSwitch() {
+  let on = false;
+  try { on = localStorage.getItem('rl-start') === location.hash; } catch (e) { /* storage blocked */ }
+  return `<label class="startsw"><input type="checkbox" data-start${on ? ' checked' : ''}><span>Open the app on this page <small>(on this device)</small></span></label>`;
 }
 
 function shelfPage(key) {
   const shelf = SHELVES.find((s) => s.key === key);
   if (!shelf) return notFound();
-const list = books.filter(shelf.test).filter((b) =>
-  (!filters.lang || b.language === filters.lang) &&
-  (!filters.own || b.ownership === filters.own) &&
-  (!filters.fmt || b.format === filters.fmt) &&
-  (!filters.copies || (b.copies || []).includes(filters.copies))
-);
-    // READ FULL PAGE DESCENDING ORDER 
-  if (key === 'read') {
-    list.sort((a, b) => {
-      const hasA = a.finished_at ? 1 : 0;
-      const hasB = b.finished_at ? 1 : 0;
-      if (hasA !== hasB) return hasB - hasA;
-      if (hasA === 1 && hasB === 1) return new Date(b.finished_at) - new Date(a.finished_at);
-      return new Date(b.created_at || 0) - new Date(a.created_at || 0);
-    });
-  }
-  // ... rest of the function
+  const list = books.filter(shelf.test).filter(passes);
+  const sorts = key === 'read' ? SORT_READ : SORT_DEFAULT;
+  sortList(list, sorts);
+  const groups = ['lang', ...(key === 'buy' ? [] : ['own']), ...(key === 'all' || key === 'buy' ? ['fmt'] : []), 'copies', ...(key === 'audio' ? [] : ['type'])];
 
   const bar = SHELVES.map((s) =>
     `<a class="shelf-pill" href="${s.key === 'all' ? '#/all' : '#/shelf/' + s.key}" ${s.key === key ? 'aria-current="page"' : ''}>${s.label}<span class="n">${books.filter(s.test).length}</span></a>`
@@ -382,21 +503,31 @@ const list = books.filter(shelf.test).filter((b) =>
   return `<nav class="shelfbar" aria-label="Shelves"><div class="shelfbar-in">${bar}</div></nav>
   <div class="wrap">
     <h1>${shelf.label}</h1>
-    ${chips(key)}
-    ${list.length ? gridHtml(list) : '<p class="empty">No titles match these filters yet.</p>'}
+    ${chips(groups, sorts, list.length)}
+    ${list.length ? gridHtml(list, key === 'buy' ? haveCard : card) : '<p class="empty">No titles match these filters yet.</p>'}
+    ${key === 'buy' ? startSwitch() : ''}
   </div>`;
 }
 
+// The copies we have: Hardcopy or Ebook. This is the page for "do we have it at home?".
 function copiesPage(kind) {
-  const LABELS = { hardcopy: 'Hardcopy books', ebook: 'Ebook books' };
+  const LABELS = { hardcopy: 'Hardcopy books', ebook: 'Ebooks' };
   const label = LABELS[kind];
   if (!label) return notFound();
-  const list = books.filter((b) => (b.copies || []).includes(kind));
+  const have = (k) => books.filter((b) => (b.copies || []).includes(k));
+  const list = sortList(have(kind).filter(passes), SORT_DEFAULT);
+  const pill = (href, text, n, on) => `<a class="shelf-pill" href="${href}" ${on ? 'aria-current="page"' : ''}>${text}<span class="n">${n}</span></a>`;
   document.title = `${label} \u2013 Reading Ledger`;
-  return `<div class="wrap">
+  return `<nav class="shelfbar" aria-label="Copies"><div class="shelfbar-in">
+      ${pill('#/copies/hardcopy', 'Hardcopy', have('hardcopy').length, kind === 'hardcopy')}
+      ${pill('#/copies/ebook', 'Ebook', have('ebook').length, kind === 'ebook')}
+      ${pill('#/shelf/buy', 'Want to Buy', books.filter((b) => b.ownership === 'buy').length, false)}
+    </div></nav>
+  <div class="wrap">
     <h1>${label}</h1>
-    <p class="lede">${list.length} ${list.length === 1 ? 'title' : 'titles'}</p>
-    ${list.length ? gridHtml(list) : '<p class="empty">Nothing here yet.</p>'}
+    ${chips(['lang', 'type'], SORT_DEFAULT, list.length)}
+    ${list.length ? gridHtml(list) : '<p class="empty">No titles match these filters yet.</p>'}
+    ${startSwitch()}
   </div>`;
 }
 
@@ -410,11 +541,277 @@ function genrePage(slug) {
   // Prefer the human-written genre from a matching book; fall back to a title-cased slug.
   const found = list.flatMap((b) => b.genres || []).find((g) => genreKey(g) === slug);
   const label = GENRE_PAGES[slug] || found || slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  sortList(list, SORT_DEFAULT);
   document.title = `${label} \u2013 Reading Ledger`;
   return `<div class="wrap">
     <h1>${esc(label)}</h1>
     <p class="lede">${list.length} ${list.length === 1 ? 'title' : 'titles'}</p>
+    <div class="filters">${sortSelect(SORT_DEFAULT)}</div>
     ${list.length ? gridHtml(list) : '<p class="empty">Nothing here yet.</p>'}
+  </div>`;
+}
+
+// ---------- series and comics ----------
+// What a series looks like as a whole: how far through it I am, and what comes next.
+function seriesInfo(list) {
+  const ordered = list.slice().sort(SORTS.series[1]);
+  const read = ordered.filter((b) => b.status === 'read').length;
+  const reading = ordered.find((b) => b.status === 'reading');
+  const started = read > 0 || Boolean(reading);
+  // Next up: the one being read now, otherwise the first unread one after the last one read.
+  const lastRead = ordered.map((b) => b.status).lastIndexOf('read');
+  const next = reading || ordered.slice(lastRead + 1).find((b) => b.status !== 'read') || ordered.find((b) => b.status !== 'read') || null;
+  return { name: ordered[0].series, list: ordered, total: ordered.length, read, started, done: read === ordered.length, next };
+}
+const progressBar = (read, total) => `<span class="pbar" role="img" aria-label="${read} of ${total} read"><i style="width:${total ? Math.round((read / total) * 100) : 0}%"></i></span>`;
+const numberOf = (b) => (b.series_no != null ? `#${b.series_no}` : b.title);
+
+// Every title in one series, in series order.
+function seriesPage(name) {
+  const all = inSeries(name);
+  if (!all.length) return notFound();
+  const info = seriesInfo(all);
+  const list = sortList(all, SORT_SERIES);
+  const label = info.name;
+  const comics = all.some(isComics);
+  setNav(comics ? 'comics' : 'books');
+  document.title = `${label} – Reading Ledger`;
+  const nextLine = info.done ? 'All read.' : info.next
+    ? `${info.started ? 'Next' : 'Start with'}: <a href="#/book/${esc(info.next.id)}">${esc(numberOf(info.next))}</a>` : '';
+  return `<div class="wrap">
+    <p class="eyebrow">${comics ? 'Comics series' : 'Series'}</p>
+    <h1 class="${/[ঀ-৿]/.test(label) ? 'bn' : ''}">${esc(label)}</h1>
+    <div class="sprog">${progressBar(info.read, info.total)}<span><b>${info.read} of ${info.total}</b> read${nextLine ? ` · ${nextLine}` : ''}</span></div>
+    <div class="filters">${sortSelect(SORT_SERIES)}</div>
+    ${gridHtml(list, seriesCard)}
+  </div>`;
+}
+
+// The comics section: the same entries as on the shelves, arranged by series.
+function comicsPage() {
+  const comics = books.filter(isComics);
+  document.title = 'Comics – Reading Ledger';
+  if (!comics.length) return `<div class="wrap"><h1>Comics</h1><p class="empty">No comics yet. Give a title the genre “Comics”, “Manga” or “Graphic novels” in the dashboard and it appears here.</p></div>`;
+  const groups = new Map();
+  const singles = [];
+  comics.forEach((b) => {
+    if (!b.series) { singles.push(b); return; }
+    const key = norm(b.series);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(b);
+  });
+  const all = [...groups.values()].map(seriesInfo);
+  const show = route().params.get('show') || '';
+  const kept = all.filter((x) => (show === 'reading' ? x.started && !x.done : show === 'done' ? x.done : show === 'new' ? !x.started : true))
+    .sort((a, b) => (b.started && !b.done ? 1 : 0) - (a.started && !a.done ? 1 : 0) || collator.compare(a.name, b.name));
+  const inProgress = all.filter((x) => x.started && !x.done && x.next);
+  const bnOf = (text) => (/[ঀ-৿]/.test(text) ? 'bn' : '');
+  const stack = (x) => {
+    // Up to three covers fanned out: the next issue on top.
+    const top = x.next || x.list[0];
+    const under = x.list.filter((b) => b !== top).slice(0, 2);
+    return `<a class="stack" href="${esc(seriesHref(x.name))}">
+      <div class="stack-covers n${under.length + 1}">${under.reverse().map((b) => coverHtml(b)).join('')}${coverHtml(top)}</div>
+      <h3 class="ct ${bnOf(x.name)}">${esc(x.name)}</h3>
+      <p class="ca">${x.read} of ${x.total} read</p>
+      ${progressBar(x.read, x.total)}
+    </a>`;
+  };
+  const cont = inProgress.length ? `<section class="shelf-row" aria-label="Continue reading">
+      <div class="row-head"><h2>Continue reading</h2></div>
+      <div class="row">${inProgress.map((x) => `<a class="card" href="#/book/${esc(x.next.id)}">
+        ${coverHtml(x.next)}
+        <h3 class="ct ${bnOf(x.name)}">${esc(x.name)}</h3>
+        <p class="ca">Next: ${esc(numberOf(x.next))} · ${x.read} of ${x.total} read</p>
+        ${progressBar(x.read, x.total)}
+      </a>`).join('')}</div>
+    </section>` : '';
+  const chip = (v, t) => `<button type="button" class="chip" data-g="show" data-v="${v}" aria-pressed="${show === v}">${t}</button>`;
+  const read = comics.filter((b) => b.status === 'read').length;
+  return `<div class="wrap">
+    <h1>Comics</h1>
+    <p class="lede">${comics.length} ${comics.length === 1 ? 'issue' : 'issues and books'} · ${all.length} series · ${read} read</p>
+    ${cont}
+    ${all.length ? `<section class="shelf-row"><div class="row-head"><h2>Series</h2></div>
+      <div class="filters"><div class="chipgroup" role="group" aria-label="Show">${chip('', 'All')}${chip('reading', 'In progress')}${chip('new', 'Not started')}${chip('done', 'Finished')}</div></div>
+      ${kept.length ? `<div class="grid stacks">${kept.map(stack).join('')}</div>` : '<p class="empty">No series here.</p>'}
+    </section>` : ''}
+    ${singles.length ? `<section class="shelf-row"><div class="row-head"><h2>${all.length ? 'Single issues and one-offs' : 'All comics'}</h2></div>${gridHtml(sortList(singles, SORT_DEFAULT))}</section>` : ''}
+    ${all.length ? '' : '<p class="hint">To group issues into series, give them a series name in the dashboard (Tools → Series can read it from the titles).</p>'}
+  </div>`;
+}
+
+// ---------- stats ----------
+// Books, comics and audiobooks are counted together everywhere; the charts only show the split.
+const KINDS = [['book', 'Books'], ['comic', 'Comics'], ['audio', 'Audiobooks']];
+const kindOf = (b) => (b.format === 'Audiobook' ? 'audio' : isComics(b) ? 'comic' : 'book');
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const num = (n) => Number(n).toLocaleString('en');
+const emptyCount = () => ({ book: 0, comic: 0, audio: 0, total: 0 });
+function tally(list) {
+  const c = emptyCount();
+  list.forEach((b) => { c[kindOf(b)] += 1; c.total += 1; });
+  return c;
+}
+const splitText = (c) => KINDS.filter(([k]) => c[k]).map(([k, label]) => `${num(c[k])} ${c[k] === 1 ? label.slice(0, -1).toLowerCase() : label.toLowerCase()}`).join(', ');
+
+// A stacked column chart: one column per label, one segment per kind.
+// columns = [{ label, long, count: {book, comic, audio, total}, key?, on? }]
+function columnChart(columns, title) {
+  const max = Math.max(1, ...columns.map((c) => c.count.total));
+  const step = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000].find((v) => max / v <= 4) || 1000;
+  const top = Math.ceil(max / step) * step;
+  const peak = columns.reduce((best, c) => (c.count.total > best.count.total ? c : best), columns[0]);
+  const lines = [];
+  for (let v = 0; v <= top; v += step) lines.push(`<span class="vz-line" style="bottom:${(v / top) * 100}%"><i>${num(v)}</i></span>`);
+  const cols = columns.map((c) => {
+    const segs = KINDS.filter(([k]) => c.count[k]).map(([k]) => `<i class="vz-seg k-${k}" style="height:${(c.count[k] / top) * 100}%"></i>`).join('');
+    const tip = `${c.long}: ${num(c.count.total)} finished${c.count.total ? ` (${splitText(c.count)})` : ''}`;
+    const label = (c.on || c === peak) && c.count.total ? `<b class="vz-val" style="bottom:${(c.count.total / top) * 100}%">${num(c.count.total)}</b>` : '';
+    const inner = `${label}<span class="vz-stack">${segs}</span><span class="vz-x">${esc(c.label)}</span>`;
+    return c.key
+      ? `<button type="button" class="vz-col${c.on ? ' on' : ''}" data-year="${esc(c.key)}" data-tip="${esc(tip)}" aria-pressed="${Boolean(c.on)}" aria-label="${esc(tip)}">${inner}</button>`
+      : `<div class="vz-col" data-tip="${esc(tip)}" tabindex="0" role="img" aria-label="${esc(tip)}">${inner}</div>`;
+  }).join('');
+  const used = KINDS.filter(([k]) => columns.some((c) => c.count[k]));
+  const table = `<details class="vz-table"><summary>Show as a table</summary><table class="facts"><thead><tr><th scope="col">${esc(title)}</th>${used.map(([, l]) => `<th scope="col">${l}</th>`).join('')}<th scope="col">Total</th></tr></thead><tbody>${
+    columns.map((c) => `<tr><th scope="row">${esc(c.long)}</th>${used.map(([k]) => `<td>${num(c.count[k])}</td>`).join('')}<td>${num(c.count.total)}</td></tr>`).join('')}</tbody></table></details>`;
+  return `<div class="vz">
+    <div class="vz-legend">${used.map(([k, l]) => `<span><i class="k-${k}"></i>${l}</span>`).join('')}</div>
+    <div class="vz-scroll"><div class="vz-plot" style="--n:${columns.length}"><div class="vz-grid">${lines.join('')}</div><div class="vz-cols">${cols}</div></div></div>
+    ${table}
+  </div>`;
+}
+
+// One bar split into parts, each labelled directly: [[label, count, kind class], ...]
+function shareBar(title, parts) {
+  const total = parts.reduce((sum, [, n]) => sum + n, 0);
+  if (!total) return '';
+  const live = parts.filter(([, n]) => n);
+  return `<div class="share"><h3>${title}</h3>
+    <div class="share-bar">${live.map(([label, n, k]) => `<i class="k-${k}" style="flex:${n}" data-tip="${esc(`${label}: ${num(n)} (${Math.round((n / total) * 100)}%)`)}"></i>`).join('')}</div>
+    <ul class="share-key">${live.map(([label, n, k]) => `<li><i class="k-${k}"></i>${label} <b>${num(n)}</b> <span>${Math.round((n / total) * 100)}%</span></li>`).join('')}</ul>
+  </div>`;
+}
+
+function goalCard(year, finished) {
+  // With the "settings" table set up, the goal is shared by every device and is changed in the dashboard.
+  // Without it, each device keeps its own goal.
+  const shared = settings !== null;
+  let goal = 0;
+  if (shared) goal = Number(settings[`goal-${year}`]) || 0;
+  else { try { goal = Number(localStorage.getItem(`rl-goal-${year}`)) || 0; } catch (e) { /* storage blocked */ } }
+  if (shared) {
+    const change = ownerHere() ? `<p class="goal-edit"><a href="admin.html#goal">${goal ? 'Change the goal' : 'Set a goal in the dashboard'}</a></p>` : '';
+    if (!goal) return change ? `<section class="goal"><h2>${year} reading goal</h2><p class="lede">You have finished ${num(finished)} so far this year.</p>${change}</section>` : '';
+    return goalMeter(year, finished, goal, change);
+  }
+  const form = (label) => `<form class="goal-form" data-goal="${year}"><label>${label} <input type="number" name="goal" min="1" max="2000" inputmode="numeric" value="${goal || ''}" placeholder="e.g. 60" required></label><button class="btn primary" type="submit">Save</button>${goal ? '<button class="btn" type="button" data-goal-clear>Remove goal</button>' : ''}</form>`;
+  if (!goal) return `<section class="goal"><h2>${year} reading goal</h2><p class="lede">You have finished ${num(finished)} so far this year. Set a goal and this page tracks it.</p>${form('Titles to finish this year')}<p class="hint">The goal is saved on this device only.</p></section>`;
+  return goalMeter(year, finished, goal, `<details class="goal-edit"><summary>Change the goal</summary>${form('Titles to finish this year')}<p class="hint">The goal is saved on this device only.</p></details>`);
+}
+function goalMeter(year, finished, goal, footer) {
+  const now = new Date();
+  const start = new Date(year, 0, 1), end = new Date(Number(year) + 1, 0, 1);
+  const expected = Math.round(goal * Math.min(1, (now - start) / (end - start)));
+  const diff = finished - expected;
+  const pace = finished >= goal ? 'Goal reached.' : diff > 0 ? `${diff} ahead of pace.` : diff < 0 ? `${-diff} behind pace.` : 'Right on pace.';
+  const pct = Math.min(100, Math.round((finished / goal) * 100));
+  return `<section class="goal"><h2>${year} reading goal</h2>
+    <p class="goal-n"><b>${num(finished)}</b> of ${num(goal)} titles <span>${pct}%</span></p>
+    <div class="goal-bar" role="img" aria-label="${finished} of ${goal} finished"><i style="width:${pct}%"></i>${finished < goal ? `<u style="left:${Math.round((expected / goal) * 100)}%" title="Where you would be today at an even pace"></u>` : ''}</div>
+    <p class="lede">${pace}${finished < goal ? ` ${num(goal - finished)} to go.` : ''}</p>
+    ${footer}
+  </section>`;
+}
+
+function statsPage() {
+  document.title = 'Stats – Reading Ledger';
+  const read = books.filter((b) => b.status === 'read');
+  const dated = read.filter((b) => /^\d{4}-\d{2}/.test(b.finished_at || ''));
+  if (!read.length) return `<div class="wrap"><h1>Stats</h1><p class="empty">Stats appear once some books are marked as read.</p></div>`;
+  const thisYear = String(new Date().getFullYear());
+  const byYear = new Map();
+  dated.forEach((b) => { const y = b.finished_at.slice(0, 4); if (!byYear.has(y)) byYear.set(y, []); byYear.get(y).push(b); });
+  const years = [...byYear.keys()].sort();
+  const asked = route().params.get('year') || '';
+  const year = byYear.has(asked) ? asked : byYear.has(thisYear) ? thisYear : years[years.length - 1] || thisYear;
+  const inYear = byYear.get(year) || [];
+  const count = tally(inYear);
+
+  // every year from the first to this one, so quiet years show as gaps rather than vanish
+  const first = Number(years[0] || thisYear);
+  const yearCols = [];
+  for (let y = first; y <= Number(thisYear); y += 1) {
+    const key = String(y);
+    yearCols.push({ label: `’${key.slice(2)}`, long: key, count: tally(byYear.get(key) || []), key: byYear.has(key) ? key : '', on: key === year });
+  }
+  const monthCols = MONTH_SHORT.map((m, i) => ({
+    label: m, long: `${MONTHS[i]} ${year}`,
+    count: tally(inYear.filter((b) => Number(b.finished_at.slice(5, 7)) === i + 1)),
+  }));
+
+  const withPages = inYear.filter((b) => b.pages);
+  const pages = withPages.reduce((sum, b) => sum + b.pages, 0);
+  const longest = withPages.slice().sort((a, b) => b.pages - a.pages)[0];
+  const link = (b) => `<a class="${lc(b)}" href="#/book/${esc(b.id)}">${esc(b.title)}</a>`;
+  const shelfCount = (key) => books.filter(SHELVES.find((x) => x.key === key).test).length;   // same numbers as the shelves
+  const all = tally(read);
+  const tile = (n, label, sub = '', href = '') => `<${href ? `a href="${href}"` : 'div'} class="stile"><b>${n}</b><span>${label}</span>${sub ? `<small>${sub}</small>` : ''}</${href ? 'a' : 'div'}>`;
+  const undated = read.length - dated.length;
+
+  const authors = new Map();
+  read.forEach((b) => authors.set(b.author, (authors.get(b.author) || 0) + 1));
+  const topAuthors = [...authors.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const topMax = topAuthors.length ? topAuthors[0][1] : 1;
+
+  const copies = { hard: 0, ebook: 0, both: 0, none: 0 };
+  read.filter((b) => b.format === 'Book').forEach((b) => {
+    const c = b.copies || [];
+    copies[c.includes('hardcopy') && c.includes('ebook') ? 'both' : c.includes('hardcopy') ? 'hard' : c.includes('ebook') ? 'ebook' : 'none'] += 1;
+  });
+  const recent = inYear.slice().sort((a, b) => String(b.finished_at).localeCompare(String(a.finished_at))).slice(0, 14);
+
+  return `<div class="wrap statpage">
+    <h1>Stats</h1>
+    ${goalCard(thisYear, (byYear.get(thisYear) || []).length)}
+    <section class="stiles">
+      ${tile(num(count.total), `Finished in ${year}`, splitText(count))}
+      ${tile(num(shelfCount('reading')), 'Reading now', '', '#/shelf/reading')}
+      ${tile(num(shelfCount('want')), 'On the to-read pile', '', '#/shelf/want')}
+      ${tile(num(read.length), 'Finished, all time', `${splitText(all)}${undated ? `. ${num(undated)} have no finish date, so they are not in the charts` : ''}`)}
+    </section>
+    <section class="vz-card"><h2>Finished each year</h2><p class="hint">Pick a year to see its months.</p>${columnChart(yearCols, 'Year')}</section>
+    <section class="vz-card"><h2>${year}, month by month</h2>
+      ${columnChart(monthCols, 'Month')}
+      <p class="lede">${pages ? `${num(pages)} pages across the ${num(withPages.length)} of these with a page count${longest ? `. Longest: ${link(longest)} (${num(longest.pages)} pages)` : ''}.` : 'None of these have a page count yet.'}</p>
+    </section>
+    ${recent.length ? `<section class="shelf-row"><div class="row-head"><h2>Finished in ${year}</h2><a href="#/shelf/read">See the Read shelf</a></div><div class="row">${recent.map(homeCard).join('')}</div></section>` : ''}
+    <section class="vz-card"><h2>Everything read so far</h2>
+      ${shareBar('Kind', [['Books', all.book, 'book'], ['Comics', all.comic, 'comic'], ['Audiobooks', all.audio, 'audio']])}
+      ${shareBar('Language', [['Bengali', read.filter((b) => b.language === 'Bengali').length, 's1'], ['English', read.filter((b) => b.language === 'English').length, 's2']])}
+      ${shareBar('Copy of the books read', [['Hardcopy', copies.hard, 's1'], ['Ebook', copies.ebook, 's2'], ['Both', copies.both, 's3'], ['Not recorded', copies.none, 'none']])}
+    </section>
+    <section class="vz-card"><h2>Most-read authors</h2>
+      <ol class="rank">${topAuthors.map(([name, n]) => `<li><a class="${/[ঀ-৿]/.test(name) ? 'bn' : ''}" href="${esc(authorHref(name))}">${esc(name)}</a><span class="rank-bar"><i style="width:${(n / topMax) * 100}%"></i></span><b>${num(n)}</b></li>`).join('')}</ol>
+    </section>
+  </div>`;
+}
+
+// Every title by one author. The name in the address must match the author's name exactly
+// (ignoring capitals and extra spaces).
+function authorPage(name) {
+  const key = norm(name);
+  const list = sortList(books.filter((b) => norm(b.author) === key), SORT_AUTHOR);
+  if (!key || !list.length) return notFound();
+  const label = list[0].author;
+  document.title = `${label} \u2013 Reading Ledger`;
+  return `<div class="wrap">
+    <p class="eyebrow">Author</p>
+    <h1 class="${/[\u0980-\u09FF]/.test(label) ? 'bn' : ''}">${esc(label)}</h1>
+    <p class="lede">${list.length} ${list.length === 1 ? 'title' : 'titles'}</p>
+    <div class="filters">${sortSelect(SORT_AUTHOR)}</div>
+    ${gridHtml(list)}
   </div>`;
 }
 
@@ -444,9 +841,26 @@ function detailPage(id) {
     ['Ownership', OWN[b.ownership]],
     ...(audio ? [] : [['Copies', (b.copies || []).filter((c) => COPY[c]).map((c) => COPY[c]).join(' and ')]]),
   ].map(([k, v]) => `<tr><th scope="row">${k}</th><td>${v || v === 0 ? esc(v) : '\u2014'}</td></tr>`).join('');
+  const seriesNo = b.series_no != null ? ` #${esc(b.series_no)}` : '';
+  const bnSeries = /[\u0980-\u09FF]/.test(b.series || '') ? 'bn' : '';
+  const seriesLine = b.series ? `<p class="series-line"><a class="${bnSeries}" href="${esc(seriesHref(b.series))}">${esc(b.series)}</a>${seriesNo}</p>` : '';
+  const siblings = b.series ? inSeries(b.series).sort(SORTS.series[1]) : [];
+  // Show the books around this one in the series (the one before it first).
+  const at = Math.max(0, siblings.findIndex((x) => x.id === b.id) - 1);
+  const nearby = siblings.slice(Math.min(at, Math.max(0, siblings.length - 12)), Math.min(at, Math.max(0, siblings.length - 12)) + 12).filter((x) => x.id !== b.id);
+  const moreSeries = nearby.length ? `<section class="shelf-row more-by" aria-label="More in this series">
+      <div class="row-head"><h2>More in <span class="${bnSeries}">${esc(b.series)}</span></h2><a href="${esc(seriesHref(b.series))}">See all (${siblings.length})</a></div>
+      <div class="row">${nearby.map(homeCard).join('')}</div>
+    </section>` : '';
+  const others = books.filter((x) => x.id !== b.id && norm(x.author) === norm(b.author)).sort(byTitle);
+  const moreBy = others.length ? `<section class="shelf-row more-by" aria-label="More by this author">
+      <div class="row-head"><h2>More by <span class="${lc(b)}">${esc(b.author)}</span></h2><a href="${esc(authorHref(b.author))}">See all (${others.length + 1})</a></div>
+      <div class="row">${others.slice(0, 12).map(homeCard).join('')}</div>
+    </section>` : '';
+  const edit = ownerHere() ? `<a class="btn editbtn" href="admin.html#edit=${esc(b.id)}">${ICON.edit}Edit</a>` : '';
   document.title = `${b.title} \u2013 Reading Ledger`;
   return `<div class="wrap">
-    <a class="backbtn" href="${esc(backHash)}">${ICON.left}Back to ${esc(backLabel)}</a>
+    <div class="detail-top"><a class="backbtn" href="${esc(backHash)}" data-back>${ICON.left}Back to ${esc(backLabel)}</a>${edit}</div>
     <article class="detail${audio ? ' audio' : ''}">
       <div class="detail-side">
         ${link ? `<a class="ytlink" href="${esc(link)}" target="_blank" rel="noopener noreferrer" aria-label="Watch ${esc(b.title)} on YouTube">${coverHtml(b, true)}</a>` : coverHtml(b, true)}
@@ -455,7 +869,8 @@ function detailPage(id) {
       <div>
         <div class="dtags">${statusBadge(b)}${badge(b)}${copyBadges(b)}</div>
         <h1 class="${lc(b)}">${esc(b.title)}</h1>
-        <p class="author ${lc(b)}">${esc(b.author)}</p>
+        <p class="author ${lc(b)}"><a href="${esc(authorHref(b.author))}">${esc(b.author)}</a></p>
+        ${seriesLine}
         <p class="meta">${meta}</p>
         ${(b.genres || []).length ? `<ul class="genres" aria-label="Genres">${b.genres.map((g) => {
           const slug = genreKey(g);
@@ -469,15 +884,29 @@ function detailPage(id) {
         <table class="facts"><tbody>${facts}</tbody></table>
       </div>
     </article>
+    ${moreSeries}
+    ${moreBy}
   </div>`;
 }
 
-function searchPage(q) {
-  const hits = books.filter((b) => norm(b.title).includes(q) || norm(b.author).includes(q));
+// Search looks at the title, the author, the series and the genres. Every word you type must appear somewhere,
+// in any order ("ray feluda" finds Feluda books by Satyajit Ray). Title matches come first.
+const hayCache = new WeakMap();
+function hay(b) {
+  if (!hayCache.has(b)) hayCache.set(b, norm(`${b.title} ${b.author} ${b.series || ''} ${(b.genres || []).join(' ')}`));
+  return hayCache.get(b);
+}
+function searchPage(text) {
+  const q = norm(text);
   document.title = `Search \u2013 Reading Ledger`;
+  if (!q) return `<div class="wrap"><h1>Search</h1><p class="empty">Type a title, an author or a genre.</p></div>`;
+  const words = q.split(' ');
+  const hits = books.filter((b) => words.every((w) => hay(b).includes(w)));
+  const rank = (b) => (norm(b.title).includes(q) ? 0 : norm(b.author).includes(q) ? 1 : 2);
+  hits.sort((a, b) => rank(a) - rank(b));               // the sort is stable: newest first within each group
   return `<div class="wrap"><h1>Search results</h1>
-    <p class="lede">${hits.length} ${hits.length === 1 ? 'title matches' : 'titles match'} \u201c${esc(qEl.value.trim())}\u201d</p>
-    ${hits.length ? gridHtml(hits) : '<p class="empty">Nothing found. Try a different spelling or part of the name.</p>'}
+    <p class="lede">${hits.length} ${hits.length === 1 ? 'title matches' : 'titles match'} \u201c${esc(text.trim())}\u201d</p>
+    ${hits.length ? gridHtml(hits, haveCard) : '<p class="empty">Nothing found. Try a different spelling or part of the name.</p>'}
   </div>`;
 }
 
@@ -486,9 +915,11 @@ let backHash = '#/all';
 let backLabel = 'Books';
 let lastHash = location.hash;
 function rememberBack(from) {
-  if (/^#\/book\//.test(from)) return;                       // never go "back" to another book page
-  if (from === '' || from === '#' || from === '#/') { backHash = '#/'; backLabel = 'Home'; }
-  else if (/^#\/(all|shelf\/)/.test(from)) { backHash = from; backLabel = 'Books'; }
+  const [path] = String(from || '').replace(/^#\/?/, '').split('?');
+  const [page, name] = path.split('/');
+  if (page === 'book') return;                               // never go "back" to another book page
+  backHash = from || '#/';
+  backLabel = !page ? 'Home' : page === 'search' ? 'search results' : page === 'author' || page === 'series' ? safeDecode(name || '') || 'Books' : page === 'comics' ? 'Comics' : page === 'stats' ? 'Stats' : 'Books';
 }
 
 // ---------- router ----------
@@ -506,12 +937,12 @@ function draw() {
     return;
   }
   grids = {};
-  const q = norm(qEl.value);
-  const parts = location.hash.replace(/^#\/?/, '').split('/');
+  const { parts, params } = route();
   const page = parts[0] || 'home';
-  const path = parts.slice(0, 2).join('/');
-  if (path !== lastPath) { filters = { lang: '', own: '', fmt: '', copies: '' }; lastPath = path; shown = {}; }
-  if (q) { setNav(''); app.innerHTML = searchPage(q); return; }
+  const opt = (name) => params.get(name) || '';
+  filters = { lang: opt('lang'), own: opt('own'), fmt: opt('fmt'), copies: opt('copies'), type: opt('type') };
+  sortKey = opt('sort');
+  if (page === 'search') { setNav(''); app.innerHTML = searchPage(opt('q')); return; }
   if (page === 'book') { setNav('books'); app.innerHTML = detailPage(parts[1] || ''); return; }
   if (page === 'shelf') {
     setNav('books');
@@ -528,6 +959,10 @@ function draw() {
     app.innerHTML = genrePage(parts[1] || '');
     return;
   }
+  if (page === 'series') { setNav('books'); app.innerHTML = seriesPage(parts.slice(1).join('/')); return; }
+  if (page === 'comics') { setNav('comics'); app.innerHTML = comicsPage(); return; }
+  if (page === 'stats') { setNav('stats'); app.innerHTML = statsPage(); return; }
+  if (page === 'author') { setNav('books'); app.innerHTML = authorPage(parts.slice(1).join('/')); return; }
   if (page === 'all') { setNav('books'); app.innerHTML = shelfPage('all'); return; }
   if (page === 'home') { setNav('home'); app.innerHTML = homePage(); return; }
   setNav(''); app.innerHTML = notFound();
@@ -554,8 +989,11 @@ async function load() {
   if (saved && saved.length) { books = saved; state = 'ready'; } else state = 'loading';
   render();
   try {
-    const fresh = await fetchShelf();
-    const changed = state !== 'ready' || JSON.stringify(fresh) !== JSON.stringify(books);
+    const [fresh, freshSettings] = await Promise.all([fetchShelf(), fetchSettings().catch(() => settings)]);
+    const settingsChanged = JSON.stringify(freshSettings) !== JSON.stringify(settings);
+    settings = freshSettings;
+    try { localStorage.setItem('rl-settings', JSON.stringify(settings)); } catch (e) { /* storage blocked */ }
+    const changed = settingsChanged || state !== 'ready' || JSON.stringify(fresh) !== JSON.stringify(books);
     offline = false;
     if (changed) { books = fresh; state = 'ready'; writeShelfCache(fresh); }
     if (changed || document.getElementById('offline-note')) render();
@@ -578,27 +1016,126 @@ const sBtn = document.getElementById('search-btn');
 function collapseSearch() {
   sw.classList.remove('open'); topBar.classList.remove('searching'); sBtn.setAttribute('aria-expanded', 'false');
 }
+function openSearch() {
+  sw.classList.add('open'); topBar.classList.add('searching'); sBtn.setAttribute('aria-expanded', 'true');
+}
+const onSearchPage = () => route().parts[0] === 'search';
+// Leave the search page: step back to where the search started, or go home if it was opened from a link.
+function leaveSearch() { if (visit && visit.pushed) history.back(); else location.hash = '#/'; }
 function closeSearch() {
-  const had = qEl.value !== '';
   qEl.value = ''; collapseSearch();
-  if (had) { shown = {}; render(); }
+  if (onSearchPage()) leaveSearch();
 }
 sBtn.addEventListener('click', () => {
   if (sw.classList.contains('open')) { closeSearch(); return; }
-  sw.classList.add('open'); topBar.classList.add('searching'); sBtn.setAttribute('aria-expanded', 'true');
+  openSearch();
   qEl.focus();
 });
 qEl.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeSearch(); sBtn.focus(); } });
 document.addEventListener('pointerdown', (e) => {
-  if (sw.classList.contains('open') && !qEl.value && !e.target.closest('#sw')) collapseSearch();
+  if (sw.classList.contains('open') && !qEl.value && !e.target.closest('#sw')) { collapseSearch(); if (onSearchPage()) leaveSearch(); }
+});
+// A shorter hint on phones, so it is not cut off in the narrow search box.
+const phoneQuery = matchMedia('(max-width: 600px)');
+const longHint = qEl.placeholder;
+const setHint = () => { qEl.placeholder = phoneQuery.matches ? 'Search books' : longHint; };
+setHint();
+phoneQuery.addEventListener('change', setHint);
+
+// Typing searches at once. The first letter opens the search page (one step in the Back history);
+// the letters after it only update that page's address.
+qEl.addEventListener('input', () => {
+  const target = `#/search${qEl.value ? '?q=' + encodeURIComponent(qEl.value) : ''}`;
+  if (onSearchPage()) {
+    history.replaceState(history.state, '', target);
+    lastHash = location.hash; shown = {};
+    render();
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  } else if (qEl.value) {
+    const from = location.hash;
+    history.pushState(null, '', target);
+    enter(from);
+    visit.pushed = true;
+  }
 });
 
-qEl.addEventListener('input', () => { shown = {}; render(); });
-window.addEventListener('hashchange', () => { rememberBack(lastHash); lastHash = location.hash; qEl.value = ''; collapseSearch(); render(); window.scrollTo(0, 0); });
-// Clicking a top-bar link always leaves search, even if the address does not change.
-topBar.addEventListener('click', (e) => {
-  if (e.target.closest('a')) { qEl.value = ''; collapseSearch(); setTimeout(render, 0); }
+// ---------- moving between pages ----------
+// Each step in the browser's history gets a small record: how far it was scrolled and how many cards
+// each grid had drawn. Coming back to a step (Back / Forward) restores both; a new step starts at the top.
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+const visits = {};
+let visit = null;
+let visitSeq = 0;
+function enter(from) {
+  if (visit) visit.shown = { ...shown };                     // the page we are leaving
+  filtersOpen = false; document.documentElement.classList.remove('sheet-open'); tipEl.hidden = true;
+  let id = history.state && history.state.rl;
+  const known = Boolean(id && visits[id]);
+  if (!id) { id = `${Date.now()}-${visitSeq += 1}`; history.replaceState({ rl: id }, ''); }
+  visit = visits[id] || (visits[id] = { y: 0, shown: {}, from: from || '#/' });
+  shown = known ? { ...visit.shown } : {};
+  rememberBack(from);
+  lastHash = location.hash;
+  if (onSearchPage()) {                                       // show the search text in the box (e.g. after Back or a shared link)
+    const q = route().params.get('q') || '';
+    if (document.activeElement !== qEl) qEl.value = q;
+    openSearch();
+  } else { qEl.value = ''; collapseSearch(); }
+  const y = known ? visit.y : 0;
+  render();
+  window.scrollTo({ top: y, behavior: 'instant' });
+}
+window.addEventListener('scroll', () => { if (visit) visit.y = window.scrollY; }, { passive: true });
+window.addEventListener('hashchange', () => enter(lastHash));
+
+// The yearly goal on the Stats page (kept on this device).
+app.addEventListener('submit', (e) => {
+  const form = e.target.closest('[data-goal]');
+  if (!form) return;
+  e.preventDefault();
+  const goal = Math.round(Number(new FormData(form).get('goal')));
+  if (!(goal > 0)) return;
+  try { localStorage.setItem(`rl-goal-${form.dataset.goal}`, String(goal)); } catch (err) { /* storage blocked */ }
+  render();
 });
+
+// A small label that follows the pointer (or keyboard focus) over a chart's bars.
+const tipEl = document.createElement('div');
+tipEl.className = 'vz-tip'; tipEl.hidden = true; tipEl.setAttribute('role', 'status');
+document.body.appendChild(tipEl);
+function showTip(el) {
+  if (!el) { tipEl.hidden = true; return; }
+  tipEl.textContent = el.dataset.tip;
+  tipEl.hidden = false;
+  const r = el.getBoundingClientRect();
+  const w = tipEl.offsetWidth;
+  tipEl.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2))}px`;
+  tipEl.style.top = `${Math.max(8, r.top - tipEl.offsetHeight - 8) + window.scrollY}px`;
+}
+app.addEventListener('pointerover', (e) => showTip(e.target.closest('[data-tip]')));
+app.addEventListener('pointerleave', () => showTip(null));
+app.addEventListener('focusin', (e) => showTip(e.target.closest('[data-tip]')));
+app.addEventListener('focusout', () => showTip(null));
+
+// Redraw after a filter or sort change and put the keyboard focus back on the control that was used.
+function redraw(focusSelector) {
+  shown = {};
+  render();
+  const el = focusSelector && app.querySelector(focusSelector);
+  if (el) el.focus({ preventScroll: true });
+}
+app.addEventListener('change', (e) => {
+  const start = e.target.closest('[data-start]');
+  if (start) {
+    try { if (start.checked) localStorage.setItem('rl-start', location.hash); else localStorage.removeItem('rl-start'); } catch (err) { /* storage blocked */ }
+    return;
+  }
+  const sel = e.target.closest('[data-sort]');
+  if (!sel) return;
+  setOption('sort', sel.value === sel.dataset.default ? '' : sel.value);
+  redraw('[data-sort]');
+});
+
 function useFallback(e) {
   const img = e.target;
   // A cover link that no longer works: draw the title-and-author cover instead of a broken picture.
@@ -637,7 +1174,34 @@ app.addEventListener('click', (e) => {
     return;
   }
   const chip = e.target.closest('.chip');
-  if (chip) { filters[chip.dataset.g] = chip.dataset.v; shown = {}; render(); return; }
+  if (chip) {
+    setOption(chip.dataset.g, chip.dataset.v);
+    redraw(`.chip[data-g="${chip.dataset.g}"][data-v="${chip.dataset.v}"]`);
+    return;
+  }
+  const filt = e.target.closest('[data-filt]');
+  if (filt) {   // the phone's filter panel
+    if (filt.dataset.filt === 'clear') { Object.keys(FILTER_LABELS).forEach((id) => setOption(id, '')); redraw('[data-filt="close"].filt-done'); return; }
+    filtersOpen = filt.dataset.filt === 'open';
+    document.documentElement.classList.toggle('sheet-open', filtersOpen);
+    const box = app.querySelector('.filters');
+    if (box) box.classList.toggle('open', filtersOpen);
+    const btn = app.querySelector('.filt-btn');
+    if (btn) { btn.setAttribute('aria-expanded', String(filtersOpen)); if (!filtersOpen) btn.focus(); }
+    return;
+  }
+  const yearBtn = e.target.closest('[data-year]');
+  if (yearBtn) { setOption('year', yearBtn.dataset.year); const y = window.scrollY; render(); window.scrollTo({ top: y, behavior: 'instant' }); const again = app.querySelector(`[data-year="${yearBtn.dataset.year}"]`); if (again) again.focus({ preventScroll: true }); return; }
+  if (e.target.closest('[data-goal-clear]')) {
+    const form = e.target.closest('[data-goal]');
+    try { localStorage.removeItem(`rl-goal-${form.dataset.goal}`); } catch (err) { /* storage blocked */ }
+    render(); return;
+  }
+  // "Back to ..." on a book page: if that page is the previous step in the history, really go back,
+  // so it returns exactly as it was left (same filters, same place in the list).
+  if (e.target.closest('[data-back]') && visit && visit.from === backHash && history.length > 1 && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+    e.preventDefault(); history.back(); return;
+  }
   const more = e.target.closest('[data-more]');
   if (more) { showMore(more.dataset.more); return; }
   const jump = e.target.closest('[data-jump]');
@@ -651,6 +1215,13 @@ app.addEventListener('click', (e) => {
   if (e.target.closest('[data-retry]')) load();
 });
 
+// A device can choose its opening page (the "Open the app on this page" switch). It applies only when
+// the app is opened at its plain address; the Home link still shows the home page.
+try {
+  const startAt = localStorage.getItem('rl-start');
+  if (startAt && /^#\/./.test(startAt) && (location.hash === '' || location.hash === '#' || location.hash === '#/')) history.replaceState(null, '', startAt);
+} catch (e) { /* storage blocked */ }
+enter(location.hash);
 load();
 
 // ---------- installable app ----------

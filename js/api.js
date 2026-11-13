@@ -138,6 +138,35 @@ export async function saveBook(data, id) {
   return row;
 }
 
+// Change the same fields on many books at once (bulk edit, merging author names).
+export async function updateBooks(ids, patch) {
+  for (let i = 0; i < ids.length; i += 100) {
+    const { error } = await sb.from('books').update(patch).in('id', ids.slice(i, i + 100));
+    if (error) throw error;
+  }
+}
+
+// ---------- shared settings (the yearly reading goal) ----------
+// Reads every setting. Returns null when the "settings" table does not exist yet.
+export async function readSettings() {
+  const { data, error } = await sb.from('settings').select('key,value');
+  if (error) { if (/PGRST205|42P01/.test(error.code || '') || /settings/.test(error.message || '')) return null; throw error; }
+  return Object.fromEntries(data.map((row) => [row.key, row.value]));
+}
+// Save one setting; a value of null removes it.
+export async function saveSetting(key, value) {
+  const q = value == null ? sb.from('settings').delete().eq('key', key)
+    : sb.from('settings').upsert({ key, value, updated_at: new Date().toISOString() });
+  const { error } = await q;
+  if (error) throw error;
+}
+
+// Change a few fields on one book, without reading it back.
+export async function patchBook(id, patch) {
+  const { error } = await sb.from('books').update(patch).eq('id', id);
+  if (error) throw error;
+}
+
 export async function deleteBook(book) {
   const { error } = await sb.from('books').delete().eq('id', book.id);
   if (error) throw error;
