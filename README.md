@@ -109,6 +109,7 @@ The installed app is the same site and the same database, so anything you add in
 - **Reading status** can be changed right in the list. Choosing *Read* fills in today as the finish date if the book has none.
 - **Change many books at once:** tick books (or tick the box in the table heading for all of them), then use the bar at the bottom to add or remove a genre, or set status, ownership, language, copies or series.
 - **Delete** is inside the book's form, at the bottom left.
+- **Several authors:** write them in the Author box separated by commas (`Brian Michael Bendis, Jeph Loeb`). Each author gets their own page, and the book appears on all of them.
 
 ### Tools
 
@@ -169,6 +170,34 @@ Good to know:
 - New issues get the genre *Comics*, so they appear in the Comics section, and they count in the shelves and totals like any other title.
 - Covers are saved as links to Comic Vine's pictures, so they use none of your storage.
 - Comic Vine asks for about one request a second, so looking up the writers takes about a second per issue.
+
+## Adding a short series by hand
+
+For a series no database has, **Import → A series by hand** creates all its issues in one go.
+
+1. Enter the series name, the writer, the year and how many issues there are.
+2. Add the covers. **Add covers from files** takes all the pictures at once and gives each to the issue whose number is in its file name (`1.jpg`, `vanya-02.png`). You can also click one cover box, drop a picture on a row, or paste the address of a cover image. Issue title, year and page count are optional; an issue with no year of its own uses the series year.
+3. Use **I have read up to**, then press **Add**.
+
+Issues that are already on your shelf (same series, same number) are skipped. A picture you choose is shrunk and saved in your own storage; a pasted address is saved as a link and only works while that site keeps the picture there.
+
+**Load from file** fills the form from a small JSON file instead of typing. One series looks like this (a file may also hold a list of them):
+
+```json
+{
+  "series": "XenoGeist",
+  "author": "Writer Name",
+  "year": 2024,
+  "language": "English",
+  "comics": true,
+  "issues": [
+    { "number": 1, "title": "Issue title", "date": "2024-03", "pages": 24, "cover": "https://example.com/cover1.jpg" },
+    { "number": 2, "title": "Issue title", "date": "2024-04", "pages": 24 }
+  ]
+}
+```
+
+Only `series` and `issues` are required. An issue can carry its own `author` when it differs from the series.
 
 ## Importing a YouTube playlist of audiobooks (optional)
 
