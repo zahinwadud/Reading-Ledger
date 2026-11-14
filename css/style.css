@@ -1066,6 +1066,10 @@ button.vz-col { cursor: pointer; }
   .dash-head .hd-util, .dash-head .theme-btn { order: 1; width: 44px; height: 44px; padding: 0; display: inline-grid; place-items: center; flex: none; }
   .dash-head .hd-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .dash-head .hd-ic { display: block; width: 20px; height: 20px; }
+  /* buttons with a label put a small space after their picture; a picture-only button must not, or it sits left of centre */
+  .dash-head .hd-util svg, .dash-head .theme-btn svg { width: 20px; height: 20px; margin: 0; }
+  #import-btn svg, #tools-btn svg { margin: 0; }
   #import-btn, #tools-btn { order: 2; flex: 1 1 calc(50% - var(--s1)); min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-size: 15px; }
   #import-btn svg, #tools-btn svg { width: 17px; height: 17px; }
 }
+.btn.theme-btn svg { margin: 0; }   /* the light/dark button has no label, on any screen size */
