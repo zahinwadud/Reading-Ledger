@@ -1,6 +1,6 @@
 // Dashboard tools: backup, duplicates, author names, series, covers.
 // Every tool shows what it found and changes nothing until you press its button.
-import { coverOf, deleteBook, updateBooks, patchBook, setCoverUrl, readSettings, saveSetting, esc, norm } from './api.js';
+import { coverOf, deleteBook, updateBooks, patchBook, setCoverUrl, readSettings, saveSetting, esc, norm, authorsOf } from './api.js';
 
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -167,7 +167,8 @@ const needsCover = (b) => b.format === 'Book' && !coverOf(b);
 const dupesNow = (loose) => duplicateGroups(hooks.getBooks(), loose).filter((g) => !notDupes.has(g.key));
 const authorCounts = () => {
   const count = new Map();
-  hooks.getBooks().forEach((b) => count.set(b.author, (count.get(b.author) || 0) + 1));
+  // each person is counted on their own, also when a book lists several authors
+  hooks.getBooks().forEach((b) => authorsOf(b.author).forEach((a) => count.set(a, (count.get(a) || 0) + 1)));
   return count;
 };
 const authorSuggestions = () => authorGroups([...authorCounts().keys()]).filter((g) => !notSame.has(g.slice().sort().join('|')));
@@ -345,12 +346,23 @@ function authorList() {
 
 async function mergeAuthors(names, keep, btn) {
   const others = names.filter((n) => n !== keep);
-  const ids = hooks.getBooks().filter((b) => others.includes(b.author)).map((b) => b.id);
+  // Swap the name inside each book's author list, so co-authors on the same book are kept.
+  const groups = new Map();           // new author text -> ids of the books that get it
+  hooks.getBooks().forEach((b) => {
+    const list = authorsOf(b.author);
+    if (!list.some((a) => others.includes(a))) return;
+    const next = [];
+    list.forEach((a) => { const name = others.includes(a) ? keep : a; if (!next.includes(name)) next.push(name); });
+    const text = next.join(', ');
+    if (!groups.has(text)) groups.set(text, []);
+    groups.get(text).push(b.id);
+  });
+  const ids = [...groups.values()].flat();
   if (!ids.length) return;
-  if (!confirm(`Change the author of ${plural(ids.length, 'book', 'books')} to “${keep}”?`)) return;
+  if (!confirm(`Change the author of ${plural(ids.length, 'book', 'books')} to \u201c${keep}\u201d?`)) return;
   btn.disabled = true;
   try {
-    await updateBooks(ids, { author: keep });
+    for (const [text, list] of groups) await updateBooks(list, { author: text });
     hooks.toast(`${plural(ids.length, 'book', 'books')} now by ${keep}`);
     mergePick.clear();
   } catch (err) { hooks.handleErr(err); }

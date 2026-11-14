@@ -1,5 +1,5 @@
 // Public site: home rows, shelf pages, book detail, live search.
-import { configured, fetchShelf, fetchSettings, readShelfCache, writeShelfCache, coverOf, ytThumb, esc, norm, initTheme, STATUS, OWN } from './core.js';
+import { configured, fetchShelf, fetchSettings, readShelfCache, writeShelfCache, coverOf, ytThumb, esc, norm, authorsOf, initTheme, STATUS, OWN } from './core.js';
 
 const app = document.getElementById('app');
 const qEl = document.getElementById('q');
@@ -110,6 +110,8 @@ function ownerHere() {
   return false;
 }
 const authorHref = (name) => `#/author/${encodeURIComponent(name)}`;
+// Is this person one of the book's authors? (A book with two authors appears on both authors' pages.)
+const wroteIt = (b, key) => authorsOf(b.author).some((a) => norm(a) === key);
 
 // ---------- shelves ----------
 // Reading-status shelves hold Books. Audiobooks have their own shelf. "All" shows everything.
@@ -820,8 +822,8 @@ function statsPage() {
   const tile = (n, label, sub = '', href = '') => `<${href ? `a href="${href}"` : 'div'} class="stile"><b>${n}</b><span>${label}</span>${sub ? `<small>${sub}</small>` : ''}</${href ? 'a' : 'div'}>`;
   const undated = read.length - dated.length;
 
-  const authors = new Map();
-  read.forEach((b) => authors.set(b.author, (authors.get(b.author) || 0) + 1));
+  const authors = new Map();          // a book by two authors counts once for each of them
+  read.forEach((b) => authorsOf(b.author).forEach((a) => authors.set(a, (authors.get(a) || 0) + 1)));
   const topAuthors = [...authors.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
   const topMax = topAuthors.length ? topAuthors[0][1] : 1;
 
@@ -862,9 +864,9 @@ function statsPage() {
 // (ignoring capitals and extra spaces).
 function authorPage(name) {
   const key = norm(name);
-  const list = sortList(books.filter((b) => norm(b.author) === key), SORT_AUTHOR);
+  const list = sortList(books.filter((b) => wroteIt(b, key)), SORT_AUTHOR);
   if (!key || !list.length) return notFound();
-  const label = list[0].author;
+  const label = authorsOf(list[0].author).find((a) => norm(a) === key) || name;
   document.title = `${label} \u2013 Reading Ledger`;
   return `<div class="wrap">
     <p class="eyebrow">Author</p>
@@ -917,11 +919,15 @@ function detailPage(id) {
       <div class="row-head"><h2>More in <span class="${hasBn(rowName) ? 'bn' : ''}">${esc(rowName)}</span></h2><a href="${esc(rowHref)}">See all (${siblings.length})</a></div>
       <div class="row">${nearby.map(seriesCard).join('')}</div>
     </section>` : '';
-  const others = books.filter((x) => x.id !== b.id && norm(x.author) === norm(b.author)).sort(byTitle);
-  const moreBy = others.length ? `<section class="shelf-row more-by" aria-label="More by this author">
-      <div class="row-head"><h2>More by <span class="${lc(b)}">${esc(b.author)}</span></h2><a href="${esc(authorHref(b.author))}">See all (${others.length + 1})</a></div>
+  // One "More by ..." row per author (at most three), each with that author's other titles.
+  const writers = authorsOf(b.author);
+  const moreBy = writers.slice(0, 3).map((name) => {
+    const others = books.filter((x) => x.id !== b.id && wroteIt(x, norm(name))).sort(byTitle);
+    return others.length ? `<section class="shelf-row more-by" aria-label="More by ${esc(name)}">
+      <div class="row-head"><h2>More by <span class="${hasBn(name) ? 'bn' : ''}">${esc(name)}</span></h2><a href="${esc(authorHref(name))}">See all (${others.length + 1})</a></div>
       <div class="row">${others.slice(0, 12).map(homeCard).join('')}</div>
     </section>` : '';
+  }).join('');
   const edit = ownerHere() ? `<a class="btn editbtn" href="admin.html#edit=${esc(b.id)}">${ICON.edit}Edit</a>` : '';
   document.title = `${b.title} \u2013 Reading Ledger`;
   return `<div class="wrap">
@@ -934,7 +940,7 @@ function detailPage(id) {
       <div>
         <div class="dtags">${statusBadge(b)}${badge(b)}${copyBadges(b)}</div>
         <h1 class="${lc(b)}">${esc(b.title)}</h1>
-        <p class="author ${lc(b)}"><a href="${esc(authorHref(b.author))}">${esc(b.author)}</a></p>
+        <p class="author ${lc(b)}">${writers.map((name) => `<a href="${esc(authorHref(name))}">${esc(name)}</a>`).join(', ') || esc(b.author)}</p>
         ${seriesLine}
         <p class="meta">${meta}</p>
         ${(b.genres || []).length ? `<ul class="genres" aria-label="Genres">${b.genres.map((g) => {

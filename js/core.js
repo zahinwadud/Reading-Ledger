@@ -27,6 +27,18 @@ export function norm(value) {
   return String(value ?? '').normalize('NFC').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
+// A book can have several authors. They are written in the one author box, separated by a comma
+// ("Brian Michael Bendis, Jeph Loeb"); ";", "&", "and" and the Bengali "ও" / "এবং" between names work too.
+// "Jeph Loeb, Jim Lee" -> ['Jeph Loeb', 'Jim Lee'].  (A "|" is left alone: it joins two spellings of one name.)
+export function authorsOf(text) {
+  const out = [];
+  String(text ?? '').split(/\s*[,;&]\s*|\s+and\s+|\s+(?:\u0993|\u098f\u09ac\u0982)\s+/i).forEach((part) => {
+    const name = part.replace(/\s+/g, ' ').trim();
+    if (name && !out.some((x) => x.toLowerCase() === name.toLowerCase())) out.push(name);
+  });
+  return out;
+}
+
 // Get the 11-character video ID from any common YouTube link
 // (watch?v=..., youtu.be/..., /embed/..., /shorts/..., /live/...). Returns '' if it is not one.
 export function ytId(url) {

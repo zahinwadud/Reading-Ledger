@@ -6,6 +6,7 @@ import {
 } from './api.js';
 
 import { openComics } from './comics.js';
+import { openSeriesAdd } from './series-add.js';
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const BENGALI = /[\u0980-\u09FF]/;
@@ -335,6 +336,7 @@ function stepDone() {
 const SVG = (inner) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
 const ICON_BOOK = SVG('<path d="M8 4.2C6.6 3.1 4.6 2.8 2.5 3.3V12c2.1-.5 4.1-.2 5.5 1"/><path d="M8 4.2c1.4-1.1 3.4-1.4 5.5-.9V12c-2.1-.5-4.1-.2-5.5 1"/><path d="M8 4.2V13"/>');
 const ICON_COMIC = SVG('<path d="M2.5 3h11v7.5h-6l-3 2.5v-2.5h-2z"/><path d="M5.5 6h5M5.5 8h3"/>');
+const ICON_STACK = SVG('<rect x="2.5" y="2.5" width="7" height="10" rx="1"/><path d="M11 4.5l2.2.6-2 8.2-2-.5"/>');
 const ICON_PLAY = SVG('<rect x="1.5" y="3.5" width="13" height="9" rx="2.5"/><path d="M6.6 6v4l3.4-2z"/>');
 
 function stepSource() {
@@ -344,8 +346,10 @@ function stepSource() {
       <button type="button" class="imp-source" id="src-gr">${ICON_BOOK}<span><b>Goodreads</b><small>Your list from a Goodreads export (a CSV file).</small></span></button>
       <button type="button" class="imp-source" id="src-yt">${ICON_PLAY}<span><b>YouTube playlist</b><small>Audiobooks from a Public or Unlisted playlist.</small></span></button>
       <button type="button" class="imp-source" id="src-cv">${ICON_COMIC}<span><b>Comics</b><small>Issues of a series or a story arc, from Comic Vine.</small></span></button>
+      <button type="button" class="imp-source" id="src-sa">${ICON_STACK}<span><b>A series by hand</b><small>A short series no database has: type it once, add the covers, or load it from a file.</small></span></button>
     </div>`,
     '<button class="btn" type="button" id="imp-cancel">Cancel</button>');
+  $('src-sa').addEventListener('click', () => openSeriesAdd(hooks));
   $('src-cv').addEventListener('click', () => openComics(hooks));
   $('src-gr').addEventListener('click', stepChoose);
   $('src-yt').addEventListener('click', () => stepPlaylist());
