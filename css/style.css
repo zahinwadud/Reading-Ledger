@@ -1057,3 +1057,15 @@ button.vz-col { cursor: pointer; }
 }
 .sa-tip { margin: 0 0 var(--s1); }
 .imp-bar #sa-covers { min-height: 36px; }
+
+/* ---------- dashboard header on phones: title with three small buttons, then Import | Tools side by side ---------- */
+.hd-ic { display: none; }
+@media (max-width: 760px) {
+  .dash-head { gap: var(--s1); margin-bottom: var(--s2); }
+  .dash-head h1 { font-size: 26px; flex: 1 1 auto; min-width: 0; }
+  .dash-head .hd-util, .dash-head .theme-btn { order: 1; width: 44px; height: 44px; padding: 0; display: inline-grid; place-items: center; flex: none; }
+  .dash-head .hd-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .dash-head .hd-ic { display: block; width: 20px; height: 20px; }
+  #import-btn, #tools-btn { order: 2; flex: 1 1 calc(50% - var(--s1)); min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-size: 15px; }
+  #import-btn svg, #tools-btn svg { width: 17px; height: 17px; }
+}
