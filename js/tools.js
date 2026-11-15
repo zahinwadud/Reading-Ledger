@@ -320,7 +320,7 @@ function authors() {
   }).join('');
   show('Tidy author names', `<p>${groups.length ? `These names look like the same author written in more than one way. In each group, choose the spelling to keep (the round button) and untick any name that is a different person.` : 'No look-alike author names found.'}</p>
     ${groupHtml}
-    <h3 class="tl-h">Merge other names</h3>
+    <h3 class="tl-h">Merge Other Names</h3>
     <p class="hint">Search for an author, tick the spellings that are the same person, then choose which one to keep.</p>
     <input id="au-filter" class="tl-input" type="search" placeholder="Search author names" value="${esc(authorFilter)}" aria-label="Search author names">
     <div id="au-list"></div>

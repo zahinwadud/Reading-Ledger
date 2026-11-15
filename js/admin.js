@@ -143,7 +143,7 @@ const hasArc = () => books.length > 0 && 'arc' in books[0];
 // like the public site. Clicking a card filters the list to it.
 // [full label, short label for small phones, test, status filter, format filter]
 const STATS = [
-  ['Total books', 'Total', () => true, '', ''],
+  ['Total Books', 'Total', () => true, '', ''],
   ['Currently Reading', 'Reading', (b) => b.format === 'Book' && b.status === 'reading', 'reading', 'Book'],
   ['Read', 'Read', (b) => b.format === 'Book' && b.status === 'read', 'read', 'Book'],
   ['Want to Read', 'To read', (b) => b.format === 'Book' && b.status === 'want', 'want', 'Book'],
@@ -153,7 +153,7 @@ function renderStats() {
   const plain = !$('s').value && !$('fl').value && !$('fm').value;
   $('stats').innerHTML = STATS.map(([full, short, test, st, fmt], i) => {
     const on = plain && $('sf').value === st && $('ff').value === fmt;
-    return `<button type="button" class="stat" data-stat="${i}" aria-pressed="${on}"><b>${books.filter(test).length}</b><span class="l-full">${full}</span><span class="l-short" aria-hidden="true">${short}</span></button>`;
+    return `<button type="button" class="stat" data-stat="${i}" aria-pressed="${on}"><b>${books.filter(test).length.toLocaleString('en')}</b><span class="l-full">${full}</span><span class="l-short" aria-hidden="true">${short}</span></button>`;
   }).join('');
 }
 // "Needs attention": how many books lack something. Tapping a counter shows just those books; tapping it again clears it.
@@ -571,7 +571,7 @@ function openPanel(book) {
   newBlob = null; removeFlag = false;
   FIELDS.forEach((f) => setErr(f, ''));
   setErr('cover', '');
-  $('panel-title').textContent = book ? 'Edit book' : 'Add book';
+  $('panel-title').textContent = book ? 'Edit Book' : 'Add Book';
   const b = book || { language: 'English', format: 'Book', status: 'want', ownership: 'buy' };
   $('f-title').value = b.title || '';
   $('f-author').value = b.author || '';

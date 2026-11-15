@@ -340,7 +340,7 @@ const ICON_STACK = SVG('<rect x="2.5" y="2.5" width="7" height="10" rx="1"/><pat
 const ICON_PLAY = SVG('<rect x="1.5" y="3.5" width="13" height="9" rx="2.5"/><path d="M6.6 6v4l3.4-2z"/>');
 
 function stepSource() {
-  show('Import books', `
+  show('Import Books', `
     <p style="margin-top:0">Where are the books you want to bring in?</p>
     <div class="imp-sources">
       <button type="button" class="imp-source" id="src-gr">${ICON_BOOK}<span><b>Goodreads</b><small>Your list from a Goodreads export (a CSV file).</small></span></button>

@@ -1,13 +1,19 @@
 // Public site: home rows, shelf pages, book detail, live search.
-import { configured, fetchShelf, fetchSettings, readShelfCache, writeShelfCache, coverOf, ytThumb, esc, norm, authorsOf, initTheme, STATUS, OWN } from './core.js';
+import { configured, fetchShelf, fetchSettings, readShelfCache, writeShelfCache, coverOf, ytThumb, ytId, esc, norm, authorsOf, initTheme, STATUS, OWN } from './core.js';
 
 const app = document.getElementById('app');
 const qEl = document.getElementById('q');
 initTheme(document.getElementById('theme'));
+function markOwner() {
+  const link = document.querySelector('.avatar-btn');
+  if (!link || !ownerHere() || link.classList.contains('owner')) return;
+  link.classList.add('owner');
+  link.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span>Dashboard</span>';
+}
 
 let books = [];
 let state = configured ? 'loading' : 'setup'; // loading | ready | error | setup
-let filters = { lang: '', own: '', fmt: '', copies: '', type: '' };   // read from the address each time a page is drawn
+let filters = { lang: '', own: '', copies: '', kind: '' };   // read from the address each time a page is drawn
 let sortKey = '';                                            // ditto ("?sort=title")
 let settings = null;     // shared settings from the database (null = that table is not set up, or not loaded yet)
 try { settings = JSON.parse(localStorage.getItem('rl-settings') || 'null'); } catch (e) { /* storage blocked */ }
@@ -37,7 +43,7 @@ const ICON = {
 // if you'd like them grouped — change the regex to /^comics$/i to keep it strict.
 const isComics = (b) => (b.genres || []).some((g) => /comic|manga|graphic novel/i.test(g));
 // How many titles each row on the home page shows ("See all" opens the full shelf).
-const HOME_ROW_LIMIT = 5;
+const HOME_ROW_LIMIT = 6;    // six per home row: all at once on a wide screen, swiped on a phone
 
 // Normalize a genre string for URL slugs and matching. Both sides must use this.
 const genreKey = (s) => String(s || '').toLowerCase().trim()
@@ -121,7 +127,7 @@ const SHELVES = [
   { key: 'want', label: 'Want to Read', test: (b) => b.format === 'Book' && b.status === 'want' },
   { key: 'audio', label: 'Audiobooks', test: (b) => b.format === 'Audiobook' },
   { key: 'buy', label: 'Want to Buy', test: (b) => b.ownership === 'buy' },   // books and audiobooks
-  { key: 'all', label: 'All titles', test: () => true },
+  { key: 'all', label: 'All Titles', test: () => true },
 ];
 
 // ---------- building blocks: cover first, then title, then author ----------
@@ -180,8 +186,10 @@ function coverHtml(b, eager) {
 
 // Reading status pill: Currently Reading / Read / Want to Read.
 const STATUS_ICON = { reading: ICON.book, read: ICON.done, want: ICON.bookmark };
+const HEARD = { want: 'Want to Listen', reading: 'Listening', read: 'Listened' };
+const statusWord = (b) => (b.format === 'Audiobook' ? HEARD[b.status] : STATUS[b.status]) || '';
 function statusBadge(b) {
-  return `<span class="badge st-${esc(b.status)}">${STATUS_ICON[b.status] || ''}${esc(STATUS[b.status])}</span>`;
+  return `<span class="badge st-${esc(b.status)}">${STATUS_ICON[b.status] || ''}${esc(statusWord(b))}</span>`;
 }
 
 // Which copies I have of a book: Hardcopy, Ebook or both. Shown on the book page only.
@@ -209,6 +217,31 @@ function cardBase(b, withTags, extra = '', cls = '') {
 }
 const card = (b) => cardBase(b, false);
 const homeCard = (b) => cardBase(b, false);
+
+// Outside the Comics page, a comic series with several issues in one list is shown once, as a stack
+// that opens the series; otherwise ten issues of one comic push everything else off the screen.
+function stackSeries(list) {
+  const groups = new Map();
+  const keyOf = (b) => (b.format !== 'Audiobook' && isComics(b) && (b.series || b.arc) ? norm(b.series || `arc ${b.arc}`) : '');
+  list.forEach((b) => { const k = keyOf(b); if (k) { if (!groups.has(k)) groups.set(k, []); groups.get(k).push(b); } });
+  const placed = new Set();
+  return list.flatMap((b) => {
+    const k = keyOf(b), g = k && groups.get(k);
+    if (!g || g.length < 2) return [b];
+    if (placed.has(k)) return [];
+    placed.add(k);
+    return [{ stack: g.slice().sort(g[0].series ? SORTS.series[1] : SORTS.arc[1]), name: g[0].series || g[0].arc, isArc: !g[0].series, format: 'Book', id: `series-${k}` }];
+  });
+}
+function stackCard(x) {
+  const top = x.stack[0], under = x.stack.slice(1, 3);
+  return `<a class="card stack" href="${esc(x.isArc ? arcHref(x.name) : seriesHref(x.name))}">
+    <div class="stack-covers n${under.length + 1}">${under.reverse().map((b) => coverHtml(b)).join('')}${coverHtml(top)}</div>
+    <h3 class="ct ${/[\u0980-\u09ff]/.test(x.name) ? 'bn' : ''}">${esc(x.name)}</h3>
+    <p class="ca">${num(x.stack.length)} issues</p>
+  </a>`;
+}
+const orStack = (fn) => (x) => (x.stack ? stackCard(x) : fn(x));
 
 // "Do we have it?" in plain words, for search results and the copies pages.
 function haveLabel(b) {
@@ -238,7 +271,7 @@ function gridBlock(key, list, wide, cardFn, heading = '') {
   grids[key] = { list, cardFn };
   const n = shown[key] = Math.min(list.length, Math.max(shown[key] || 0, BATCH));
   const more = n < list.length
-    ? `<div class="more" data-more="${key}"><button class="btn" type="button">Show more <small>${n} of ${list.length}</small></button></div>` : '';
+    ? `<div class="more" data-more="${key}"><button class="btn" type="button">Show more <small>${num(n)} of ${num(list.length)}</small></button></div>` : '';
   return `${heading}<div class="grid${wide ? ' wide' : ''}" data-grid="${key}">${list.slice(0, n).map(cardFn).join('')}</div>${more}`;
 }
 
@@ -248,8 +281,8 @@ function gridHtml(list, cardFn = card) {
   const bk = list.filter((b) => b.format !== 'Audiobook');
   const au = list.filter((b) => b.format === 'Audiobook');
   if (bk.length && au.length) {
-    const audio = () => gridBlock('au', au, true, cardFn, `<h2 class="sec-h">Audiobooks <small>${au.length}</small></h2>`);
-    const books = gridBlock('bk', bk, false, cardFn, `<h2 class="sec-h">Books <small>${bk.length}</small> <a class="sec-jump" href="#" data-jump="au">Audiobooks <small>${au.length}</small> \u2193</a></h2>`);
+    const audio = () => gridBlock('au', au, true, cardFn, `<h2 class="sec-h">Audiobooks <small>${num(au.length)}</small></h2>`);
+    const books = gridBlock('bk', bk, false, cardFn, `<h2 class="sec-h">Books <small>${num(bk.length)}</small> <a class="sec-jump" href="#" data-jump="au">Audiobooks <small>${num(au.length)}</small> \u2193</a></h2>`);
     grids.bk.then = audio;
     return books + (shown.bk >= bk.length ? audio() : '');
   }
@@ -270,7 +303,7 @@ function showMore(key, all = false) {
       more.remove();
       if (g.then) { grid.insertAdjacentHTML('afterend', g.then()); g.then = null; watchMore(); }
     } else {
-      more.querySelector('small').textContent = `${to} of ${g.list.length}`;
+      more.querySelector('small').textContent = `${num(to)} of ${num(g.list.length)}`;
       moreWatcher && moreWatcher.unobserve(more); moreWatcher && moreWatcher.observe(more);   // still in view? load again
     }
   }
@@ -306,10 +339,9 @@ function heroOffset(i, n) {
 }
 
 function heroHtml() {
-  const head = '<h1>Reading Ledger</h1><p class="sub">A personal collection of my books</p>';
   const items = heroItems();
   const n = items.length;
-  if (!n) return `<section class="hero">${head}<p class="empty">Books you finish will appear here.</p></section>`;
+  if (!n) return '<section class="hero"><p class="empty">Books you finish will appear here.</p></section>';
   if (heroActive >= n) heroActive = 0;
   const cur = items[heroActive];
   const cards = items.map((b, i) => {
@@ -321,7 +353,6 @@ function heroHtml() {
   const buttons = n > 1
     ? `<div class="cf-btns"><button class="cf-btn" type="button" data-cf="prev" aria-label="Previous book">${ICON.left}</button><button class="cf-btn next" type="button" data-cf="next" aria-label="Next book">${ICON.right}</button></div>` : '';
   return `<section class="hero" aria-label="Recently finished books">
-    ${head}
     <div class="cf-cap" aria-live="polite"><small>Recently finished</small><h2 id="cf-title" class="${lc(cur)}">${esc(cur.title)}</h2><p id="cf-author" class="${lc(cur)}">${esc(cur.author)}</p></div>
     <div class="cf" id="cf" tabindex="0" role="group" aria-roledescription="carousel" aria-label="Recently finished books. Use the left and right arrow keys.">${cards}</div>
     ${buttons}
@@ -353,57 +384,57 @@ function heroMove(step) {
   placeHero();
 }
 // Stats design
-// function statsHtml() {
-//   const count = (key) => books.filter(SHELVES.find((s) => s.key === key).test).length;
-//   const copies = (kind) => books.filter((b) => (b.copies || []).includes(kind)).length;
+// (A slimmer alternative to the folder tiles, kept in case it is wanted again; its styles are the ".ledger" rules.)
+// // The library in figures: one ruled line, like a row in a ledger. Each figure opens its shelf,
+// // and uses the same rule as that shelf, so the numbers always agree.
+// function ledgerHtml() {
+//   const c = (f) => books.filter(f).length;
+//   const shelf = (key) => c(SHELVES.find((x) => x.key === key).test);
 //   const items = [
-//     ['Total in shelf', books.length, '#/all'],
-//     ['Currently reading', count('reading'), '#/shelf/reading'],
-//     ['Read', count('read'), '#/shelf/read'],
-//     ['Want to read', count('want'), '#/shelf/want'],
-//     ['Audiobooks', count('audio'), '#/shelf/audio'],
-//     ['Hardcopy', copies('hardcopy'), '#/copies/hardcopy'],
-//     ['Ebook', copies('ebook'), '#/copies/ebook'],
-//     ['Comics', books.filter(isComics).length, '#/genre/comics'],
-//     ['Want to buy', count('buy'), '#/shelf/buy'],
+//     ['titles', books.length, '#/all'],
+//     ['reading', shelf('reading'), '#/shelf/reading'],
+//     ['read', shelf('read'), '#/shelf/read'],
+//     ['to read', shelf('want'), '#/shelf/want'],
+//     ['audiobooks', shelf('audio'), '#/shelf/audio'],
+//     ['comics', c(isComics), '#/comics'],
+//     ['hardcopy', c((x) => (x.copies || []).includes('hardcopy')), '#/copies/hardcopy'],
+//     ['ebook', c((x) => (x.copies || []).includes('ebook')), '#/copies/ebook'],
+//     ['to buy', shelf('buy'), '#/shelf/buy'],
 //   ];
-//   return `<section class="pstats" aria-label="Library statistics">${
-//     items.map(([label, n, href]) => `<a class="pstat" href="${href}"><b>${n}</b><span>${label}</span></a>`).join('')}</section>`;
+//   return `<nav class="ledger" aria-label="The library in figures">${
+//     items.map(([label, n, href]) => `<a href="${href}"><b>${Number(n).toLocaleString('en')}</b><span>${label}</span></a>`).join('')}</nav>`;
 // }
-// a scrollable row of tiny covers
+
+// The folder tiles: the library in numbers. Each tile opens its shelf and uses the same rule as that shelf,
+// so the numbers always agree.
 function statsHtml() {
   const c = (f) => books.filter(f).length;
-  // The shelf tiles use the same rules as the shelves they open, so the numbers always agree.
-  // (Reading / Read / Want to read count books; audiobooks have their own tile.)
-  const shelf = (key) => c(SHELVES.find((s) => s.key === key).test);
-
+  const shelf = (key) => c(SHELVES.find((x) => x.key === key).test);
   const items = [
-    ['Total in shelf', books.length, '#/all'],
-    ['Currently reading', shelf('reading'), '#/shelf/reading'],
+    ['Total in Shelf', books.length, '#/all'],
+    ['Currently Reading', shelf('reading'), '#/shelf/reading'],
     ['Read', shelf('read'), '#/shelf/read'],
-    ['Want to read', shelf('want'), '#/shelf/want'],
+    ['Want to Read', shelf('want'), '#/shelf/want'],
     ['Audiobooks', shelf('audio'), '#/shelf/audio'],
-    ['Hardcopy', c(b => (b.copies || []).includes('hardcopy')), '#/copies/hardcopy'],
-    ['Ebook', c(b => (b.copies || []).includes('ebook')), '#/copies/ebook'],
+    ['Hardcopy', c((x) => (x.copies || []).includes('hardcopy')), '#/copies/hardcopy'],
+    ['Ebook', c((x) => (x.copies || []).includes('ebook')), '#/copies/ebook'],
     ['Comics', c(isComics), '#/comics'],
-    ['Want to buy', shelf('buy'), '#/shelf/buy'],
+    ['Want to Buy', shelf('buy'), '#/shelf/buy'],
   ];
-
-  return `<section class="pstats" aria-label="Library statistics">
-    ${items.map(([label, n, href]) => `
+  return `<section class="pstats-sec" aria-labelledby="pstats-h"><div class="row-head"><h2 id="pstats-h"><span class="hi">${SI('bars')}</span>The Library in Numbers</h2><a href="#/stats">See the Stats${ICON.right}</a></div>
+    <div class="pstats">${items.map(([label, n, href]) => `
       <a class="pstat-folder" href="${href}">
         <span class="pf-tab" aria-hidden="true"></span>
         <span class="pf-content">
           <span class="pf-label">${label}</span>
-          <b class="pf-num">${n}</b>
+          <b class="pf-num">${num(n)}</b>
         </span>
-      </a>
-    `).join('')}
+      </a>`).join('')}</div>
   </section>`;
 }
 
-
-// ---------- pages ----------
+// The same icons as the badges on a book's page, so each one means one thing everywhere.
+const HOME_ICON = { reading: ICON.book, read: ICON.done, want: ICON.bookmark, audio: ICON.phones, buy: ICON.bag };
 function homePage() {
   const rows = SHELVES.filter((s) => s.key !== 'all').map((s) => {
     const all = books.filter(s.test);
@@ -435,39 +466,45 @@ function homePage() {
     }
     // ----------------------
 
-    const list = all.slice(0, HOME_ROW_LIMIT);
-    return `<section class="shelf-row" aria-label="${esc(s.label)}">
-      <div class="row-head"><h2>${s.label}</h2><a href="#/shelf/${s.key}">See all (${all.length})</a></div>
-      ${list.length ? `<div class="row">${list.map(homeCard).join('')}</div>` : '<p class="empty">Nothing on this shelf yet.</p>'}
+    const list = (s.key === 'audio' ? all : stackSeries(all)).slice(0, HOME_ROW_LIMIT);
+    return `<section class="shelf-row${s.key === 'reading' ? ' home-now' : ''}" aria-label="${esc(s.label)}">
+      <div class="row-head"><h2><span class="hi">${HOME_ICON[s.key]}</span>${s.label}<small>${num(all.length)}</small></h2><a href="#/shelf/${s.key}" aria-label="See all ${num(all.length)} in ${esc(s.label)}">See all${ICON.right}</a></div>
+      ${list.length ? `<div class="row fit${s.key === 'audio' ? ' wide' : ''}">${list.map(orStack(homeCard)).join('')}${all.length > list.length ? `<a class="card endcard" href="#/shelf/${s.key}"><b>${num(all.length)}</b><span>See all</span>${ICON.right}</a>` : ''}</div>` : '<p class="empty">Nothing on this shelf yet.</p>'}
     </section>`;
-  }).join('');
+  });
   
-  // ... (the rest of your homePage function, like document.title = ... and the return statement)
   document.title = 'Reading Ledger';
-  return heroHtml() + `<div class="wrap">${statsHtml()}${rows}</div>`;
+  // The same order on every screen: title, carousel, shelves, then the numbers.
+  return `<div class="home">
+    <header class="hero-head"><h1>Reading Ledger</h1><p class="sub">A personal collection of my books</p></header>
+    ${heroHtml()}
+    <div class="wrap home-first">${rows[0]}</div>
+    <div class="wrap home-rest">${rows.slice(1).join('')}${statsHtml()}</div>
+  </div>`;
 }
 
 // The filters every shelf-like page shares.
 const FILTER_LABELS = {
   lang: ['Language', [['', 'All'], ['English', 'English'], ['Bengali', 'Bengali']]],
   own: ['Ownership', [['', 'All'], ['owned', 'Owned'], ['buy', 'Want to Buy']]],
-  fmt: ['Format', [['', 'All'], ['Book', 'Books'], ['Audiobook', 'Audiobooks']]],
   copies: ['Copies', [['', 'All'], ['hardcopy', 'Hardcopy'], ['ebook', 'Ebook']]],
-  type: ['Type', [['', 'All'], ['book', 'Books'], ['comic', 'Comics']]],
+  kind: ['Kind', [['', 'All'], ['book', 'Books'], ['comic', 'Comics'], ['audio', 'Audiobooks']]],
 };
+// On a shelf that holds no audiobooks, "Kind" leaves that choice out.
+const kindOptions = (withAudio) => FILTER_LABELS.kind[1].filter(([v]) => withAudio || v !== 'audio');
 const passes = (b) =>
   (!filters.lang || b.language === filters.lang) &&
   (!filters.own || b.ownership === filters.own) &&
-  (!filters.fmt || b.format === filters.fmt) &&
   (!filters.copies || (b.copies || []).includes(filters.copies)) &&
-  (!filters.type || (filters.type === 'comic') === isComics(b));
+  (!filters.kind || kindOf(b) === filters.kind);
 
 // groups = which filters this page offers. On a phone they sit in a panel behind one "Filters" button
 // (with the ones in use shown as small removable chips); on a wide screen they are all in view.
 let filtersOpen = false;
-function chips(groups, sorts, count) {
+function chips(groups, sorts, count, withAudio = false) {
   const group = (id) => {
-    const [label, opts] = FILTER_LABELS[id];
+    const label = FILTER_LABELS[id][0];
+    const opts = id === 'kind' ? kindOptions(withAudio) : FILTER_LABELS[id][1];
     return `<div class="chipgroup" role="group" aria-label="${label}"><span class="cg-l">${label}</span>${
       opts.map(([v, t]) => `<button type="button" class="chip" data-g="${id}" data-v="${v}" aria-pressed="${filters[id] === v}">${t}</button>`).join('')
     }</div>`;
@@ -482,7 +519,13 @@ function chips(groups, sorts, count) {
     <div class="filt-sheet">
       <div class="filt-head"><b>Filters</b>${active.length ? '<button type="button" class="btn" data-filt="clear">Clear all</button>' : ''}</div>
       ${groups.map(group).join('')}
-      <button type="button" class="btn primary filt-done" data-filt="close">Show ${count} ${count === 1 ? 'title' : 'titles'}</button>
+      <button type="button" class="btn primary filt-done" data-filt="close">Show ${num(count)} ${count === 1 ? 'title' : 'titles'}</button>
+    </div>
+    <div class="fbar">
+      <span class="fbar-n">${num(count)} ${count === 1 ? 'title' : 'titles'}</span>
+      ${groups.map((id) => { const label = FILTER_LABELS[id][0]; const opts = id === 'kind' ? kindOptions(withAudio) : FILTER_LABELS[id][1];
+        return `<label class="fsel${filters[id] ? ' on' : ''}"><span>${label}</span><select data-fsel="${id}">${opts.map(([v, t]) => `<option value="${v}"${filters[id] === v ? ' selected' : ''}>${t}</option>`).join('')}</select></label>`; }).join('')}
+      ${active.length ? '<button type="button" class="fbar-clear" data-filt="clear">Clear</button>' : ''}
     </div>
     ${sortSelect(sorts)}
     ${activeChips ? `<div class="filt-active">${activeChips}</div>` : ''}
@@ -496,45 +539,50 @@ function startSwitch() {
   return `<label class="startsw"><input type="checkbox" data-start${on ? ' checked' : ''}><span>Open the app on this page <small>(on this device)</small></span></label>`;
 }
 
+// The tabs under "Books": every shelf, then the copies we have (Hardcopy, Ebook), which is the
+// "do we have it at home?" view.
+function booksTabs(current) {
+  const TAB = { all: 'All', reading: 'Reading', read: 'Read', want: 'Want to Read', audio: 'Audiobooks', buy: 'Want to Buy' };
+  const tab = (key, href, text, n) => `<a class="stab" href="${href}" ${key === current ? 'aria-current="page"' : ''}>${text}<span class="n">${num(n)}</span></a>`;
+  const have = (k) => books.filter((b) => (b.copies || []).includes(k)).length;
+  return [SHELVES.find((s) => s.key === 'all'), ...SHELVES.filter((s) => s.key !== 'all')]
+    .map((s) => tab(s.key, s.key === 'all' ? '#/all' : `#/shelf/${s.key}`, TAB[s.key], books.filter(s.test).length)).join('')
+    + tab('hardcopy', '#/copies/hardcopy', 'Hardcopy', have('hardcopy')) + tab('ebook', '#/copies/ebook', 'Ebook', have('ebook'));
+}
+
 function shelfPage(key) {
   const shelf = SHELVES.find((s) => s.key === key);
   if (!shelf) return notFound();
   const list = books.filter(shelf.test).filter(passes);
   const sorts = key === 'read' ? SORT_READ : SORT_DEFAULT;
   sortList(list, sorts);
-  const groups = ['lang', ...(key === 'buy' ? [] : ['own']), ...(key === 'all' || key === 'buy' ? ['fmt'] : []), 'copies', ...(key === 'audio' ? [] : ['type'])];
+  const groups = ['lang', ...(key === 'buy' ? [] : ['own']), 'copies', ...(key === 'audio' ? [] : ['kind'])];
+  const shownList = filters.kind === 'comic' ? list : stackSeries(list);   // asking for comics shows every issue
 
-  const bar = SHELVES.map((s) =>
-    `<a class="shelf-pill" href="${s.key === 'all' ? '#/all' : '#/shelf/' + s.key}" ${s.key === key ? 'aria-current="page"' : ''}>${s.label}<span class="n">${books.filter(s.test).length}</span></a>`
-  ).join('');
+  const bar = booksTabs(key);
   document.title = `${shelf.label} \u2013 Reading Ledger`;
-  return `<nav class="shelfbar" aria-label="Shelves"><div class="shelfbar-in">${bar}</div></nav>
-  <div class="wrap">
-    <h1>${shelf.label}</h1>
-    ${chips(groups, sorts, list.length)}
-    ${list.length ? gridHtml(list, key === 'buy' ? haveCard : card) : '<p class="empty">No titles match these filters yet.</p>'}
+  return `<div class="wrap">
+    <h1>Books</h1>
+    <nav class="stabs" aria-label="Shelves">${bar}</nav>
+    ${chips(groups, sorts, list.length, key === 'all' || key === 'buy')}
+    ${list.length ? gridHtml(shownList, orStack(key === 'buy' ? haveCard : card)) : '<p class="empty">No titles match these filters yet.</p>'}
     ${key === 'buy' ? startSwitch() : ''}
   </div>`;
 }
 
 // The copies we have: Hardcopy or Ebook. This is the page for "do we have it at home?".
 function copiesPage(kind) {
-  const LABELS = { hardcopy: 'Hardcopy books', ebook: 'Ebooks' };
+  const LABELS = { hardcopy: 'Hardcopy Books', ebook: 'Ebooks' };
   const label = LABELS[kind];
   if (!label) return notFound();
   const have = (k) => books.filter((b) => (b.copies || []).includes(k));
   const list = sortList(have(kind).filter(passes), SORT_DEFAULT);
-  const pill = (href, text, n, on) => `<a class="shelf-pill" href="${href}" ${on ? 'aria-current="page"' : ''}>${text}<span class="n">${n}</span></a>`;
   document.title = `${label} \u2013 Reading Ledger`;
-  return `<nav class="shelfbar" aria-label="Copies"><div class="shelfbar-in">
-      ${pill('#/copies/hardcopy', 'Hardcopy', have('hardcopy').length, kind === 'hardcopy')}
-      ${pill('#/copies/ebook', 'Ebook', have('ebook').length, kind === 'ebook')}
-      ${pill('#/shelf/buy', 'Want to Buy', books.filter((b) => b.ownership === 'buy').length, false)}
-    </div></nav>
-  <div class="wrap">
-    <h1>${label}</h1>
-    ${chips(['lang', 'type'], SORT_DEFAULT, list.length)}
-    ${list.length ? gridHtml(list) : '<p class="empty">No titles match these filters yet.</p>'}
+  return `<div class="wrap">
+    <h1>Books</h1>
+    <nav class="stabs" aria-label="Shelves">${booksTabs(kind)}</nav>
+    ${chips(['lang', 'kind'], SORT_DEFAULT, list.length)}
+    ${list.length ? gridHtml(filters.kind === 'comic' ? list : stackSeries(list), orStack(card)) : '<p class="empty">No titles match these filters yet.</p>'}
     ${startSwitch()}
   </div>`;
 }
@@ -553,7 +601,7 @@ function genrePage(slug) {
   document.title = `${label} \u2013 Reading Ledger`;
   return `<div class="wrap">
     <h1>${esc(label)}</h1>
-    <p class="lede">${list.length} ${list.length === 1 ? 'title' : 'titles'}</p>
+    <p class="lede">${num(list.length)} ${list.length === 1 ? 'title' : 'titles'}</p>
     <div class="filters">${sortSelect(SORT_DEFAULT)}</div>
     ${list.length ? gridHtml(list) : '<p class="empty">Nothing here yet.</p>'}
   </div>`;
@@ -592,7 +640,7 @@ function seriesPage(name) {
   return `<div class="wrap">
     <p class="eyebrow">${comics ? 'Comics series' : 'Series'}</p>
     <h1 class="${/[ঀ-৿]/.test(label) ? 'bn' : ''}">${esc(label)}</h1>
-    <div class="sprog">${progressBar(info.read, info.total)}<span><b>${info.read} of ${info.total}</b> read${nextLine ? ` · ${nextLine}` : ''}</span></div>
+    <div class="sprog">${progressBar(info.read, info.total)}<span><b>${num(info.read)} of ${num(info.total)}</b> read${nextLine ? ` · ${nextLine}` : ''}</span></div>
     <div class="filters">${sortSelect(SORT_SERIES)}</div>
     ${arcGroups(list) || gridHtml(list, seriesCard)}
   </div>`;
@@ -614,7 +662,7 @@ function arcGroups(list) {
     const span = nums.length ? (nums[0] === nums[nums.length - 1] ? `#${nums[0]}` : `#${nums[0]} to #${nums[nums.length - 1]}`) : '';
     const read = run.list.filter((b) => b.status === 'read').length;
     const head = `<div class="arc-head"><h2>${run.arc ? `<a class="${hasBn(run.arc) ? 'bn' : ''}" href="${esc(arcHref(run.arc))}">${esc(run.arc)}</a>` : (runs.length > 1 ? 'Other issues' : 'Issues')}</h2>
-      <span>${[span, `${read} of ${run.list.length} read`].filter(Boolean).join(' \u00b7 ')}</span>${progressBar(read, run.list.length)}</div>`;
+      <span>${[span, `${num(read)} of ${num(run.list.length)} read`].filter(Boolean).join(' \u00b7 ')}</span>${progressBar(read, run.list.length)}</div>`;
     return gridBlock(`g${i}`, run.list, false, seriesCard, head);
   }).join('');
 }
@@ -634,7 +682,7 @@ function arcPage(name) {
   return `<div class="wrap">
     <p class="eyebrow">Story arc${seriesNames.length ? ` \u00b7 in ${seriesNames.map((s) => `<a href="${esc(seriesHref(s))}">${esc(s)}</a>`).join(', ')}` : ''}</p>
     <h1 class="${hasBn(label) ? 'bn' : ''}">${esc(label)}</h1>
-    <div class="sprog">${progressBar(info.read, info.total)}<span><b>${info.read} of ${info.total}</b> read${nextLine ? ` \u00b7 ${nextLine}` : ''}</span></div>
+    <div class="sprog">${progressBar(info.read, info.total)}<span><b>${num(info.read)} of ${num(info.total)}</b> read${nextLine ? ` \u00b7 ${nextLine}` : ''}</span></div>
     <div class="filters">${sortSelect(SORT_ARC)}</div>
     ${gridHtml(list, seriesCard)}
   </div>`;
@@ -672,16 +720,16 @@ function comicsPage() {
     return `<a class="stack" href="${esc(x.isArc ? arcHref(x.name) : seriesHref(x.name))}">
       <div class="stack-covers n${under.length + 1}">${under.reverse().map((b) => coverHtml(b)).join('')}${coverHtml(top)}</div>
       <h3 class="ct ${bnOf(x.name)}">${esc(x.name)}</h3>
-      <p class="ca">${x.read} of ${x.total} read</p>
+      <p class="ca">${num(x.read)} of ${num(x.total)} read</p>
       ${progressBar(x.read, x.total)}
     </a>`;
   };
-  const cont = inProgress.length ? `<section class="shelf-row" aria-label="Continue reading">
-      <div class="row-head"><h2>Continue reading</h2></div>
+  const cont = inProgress.length ? `<section class="shelf-row" aria-label="Continue Reading">
+      <div class="row-head"><h2>Continue Reading</h2></div>
       <div class="row">${inProgress.map((x) => `<a class="card" href="#/book/${esc(x.next.id)}">
         ${coverHtml(x.next)}
         <h3 class="ct ${bnOf(x.name)}">${esc(x.name)}</h3>
-        <p class="ca">Next: ${esc(x.isArc ? issueLabel(x.next) : numberOf(x.next))} \u00b7 ${x.read} of ${x.total} read</p>
+        <p class="ca">Next: ${esc(x.isArc ? issueLabel(x.next) : numberOf(x.next))} \u00b7 ${num(x.read)} of ${num(x.total)} read</p>
         ${progressBar(x.read, x.total)}
       </a>`).join('')}</div>
     </section>` : '';
@@ -689,27 +737,36 @@ function comicsPage() {
   const read = comics.filter((b) => b.status === 'read').length;
   return `<div class="wrap">
     <h1>Comics</h1>
-    <p class="lede">${comics.length} ${comics.length === 1 ? 'issue' : 'issues and books'} · ${all.length} series${arcs.length ? ` \u00b7 ${arcs.length} ${arcs.length === 1 ? 'story arc' : 'story arcs'}` : ''} \u00b7 ${read} read</p>
+    <p class="lede">${num(comics.length)} ${comics.length === 1 ? 'issue' : 'issues and books'} · ${num(all.length)} series${arcs.length ? ` \u00b7 ${num(arcs.length)} ${arcs.length === 1 ? 'story arc' : 'story arcs'}` : ''} \u00b7 ${read} read</p>
     ${cont}
-    ${arcs.length ? `<section class="shelf-row"><div class="row-head"><h2>Story arcs</h2></div>
+    ${arcs.length ? `<section class="shelf-row"><div class="row-head"><h2>Story Arcs</h2></div>
       <div class="grid stacks">${arcs.slice().sort((a, b) => (b.started && !b.done ? 1 : 0) - (a.started && !a.done ? 1 : 0) || collator.compare(a.name, b.name)).map(stack).join('')}</div>
     </section>` : ''}
     ${all.length ? `<section class="shelf-row"><div class="row-head"><h2>Series</h2></div>
       <div class="filters"><div class="chipgroup" role="group" aria-label="Show">${chip('', 'All')}${chip('reading', 'In progress')}${chip('new', 'Not started')}${chip('done', 'Finished')}</div></div>
       ${kept.length ? `<div class="grid stacks">${kept.map(stack).join('')}</div>` : '<p class="empty">No series here.</p>'}
     </section>` : ''}
-    ${singles.length ? `<section class="shelf-row"><div class="row-head"><h2>${all.length ? 'Single issues and one-offs' : 'All comics'}</h2></div>${gridHtml(sortList(singles, SORT_DEFAULT))}</section>` : ''}
+    ${singles.length ? `<section class="shelf-row"><div class="row-head"><h2>${all.length ? 'Single Issues and One-Offs' : 'All Comics'}</h2></div>${gridHtml(sortList(singles, SORT_DEFAULT))}</section>` : ''}
     ${all.length ? '' : '<p class="hint">To group issues into series, give them a series name in the dashboard (Tools → Series can read it from the titles).</p>'}
   </div>`;
 }
 
 // ---------- stats ----------
+const SI = (k) => `<svg class="si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${STAT_ICON[k]}</svg>`;
+const STAT_ICON = {'cal': '<rect x="3" y="4.5" width="18" height="16.5" rx="2.5"/><path d="M16 2.5v4M8 2.5v4M3 10h18"/>', 'peak': '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>', 'pages': '<path d="M14 2.5H6.5a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8z"/><path d="M14 2.5V8h5.5M8.5 13h7M8.5 17h7"/>', 'book': '<path d="M2.5 4.5h6a3.5 3.5 0 0 1 3.5 3.5v12.5a3 3 0 0 0-3-3H2.5z"/><path d="M21.5 4.5h-6A3.5 3.5 0 0 0 12 8v12.5a3 3 0 0 1 3-3h6.5z"/>', 'target': '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>', 'bars': '<path d="M5 20v-6M12 20V4M19 20v-9"/>', 'phones': '<path d="M3.5 18v-6a8.5 8.5 0 0 1 17 0v6"/><rect x="3.5" y="14" width="4.5" height="7" rx="1.8"/><rect x="16" y="14" width="4.5" height="7" rx="1.8"/>', 'award': '<circle cx="12" cy="8.5" r="6"/><path d="M8.3 13.6 7 22l5-3 5 3-1.3-8.4"/>', 'stack': '<path d="M12 3 2.5 8 12 13l9.5-5z"/><path d="M2.5 12.5 12 17.5l9.5-5M2.5 17 12 22l9.5-5"/>', 'check': '<circle cx="12" cy="12" r="9"/><path d="m8 12.3 2.8 2.8L16.2 9.5"/>'};
+
 // Books, comics and audiobooks are counted together everywhere; the charts only show the split.
 const KINDS = [['book', 'Books'], ['comic', 'Comics'], ['audio', 'Audiobooks']];
 const kindOf = (b) => (b.format === 'Audiobook' ? 'audio' : isComics(b) ? 'comic' : 'book');
 const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const num = (n) => Number(n).toLocaleString('en');
 const emptyCount = () => ({ book: 0, comic: 0, audio: 0, total: 0 });
+// "4h 2m" or "31m" -> minutes (0 when no length is recorded), and back again
+function minutesOf(b) {
+  const m = String(b.duration || '').match(/(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?/);
+  return m && (m[1] || m[2]) ? Number(m[1] || 0) * 60 + Number(m[2] || 0) : 0;
+}
+const fmtMinutes = (n) => (n >= 60 ? `${num(Math.floor(n / 60))}h ${Math.round(n % 60)}m` : `${Math.round(n)}m`);
 function tally(list) {
   const c = emptyCount();
   list.forEach((b) => { c[kindOf(b)] += 1; c.total += 1; });
@@ -765,11 +822,11 @@ function goalCard(year, finished) {
   else { try { goal = Number(localStorage.getItem(`rl-goal-${year}`)) || 0; } catch (e) { /* storage blocked */ } }
   if (shared) {
     const change = ownerHere() ? `<p class="goal-edit"><a href="admin.html#goal">${goal ? 'Change the goal' : 'Set a goal in the dashboard'}</a></p>` : '';
-    if (!goal) return change ? `<section class="goal"><h2>${year} reading goal</h2><p class="lede">You have finished ${num(finished)} so far this year.</p>${change}</section>` : '';
+    if (!goal) return change ? `<section class="goal"><h2>${year} Reading Goal</h2><p class="lede">You have finished ${num(finished)} so far this year.</p>${change}</section>` : '';
     return goalMeter(year, finished, goal, change);
   }
   const form = (label) => `<form class="goal-form" data-goal="${year}"><label>${label} <input type="number" name="goal" min="1" max="2000" inputmode="numeric" value="${goal || ''}" placeholder="e.g. 60" required></label><button class="btn primary" type="submit">Save</button>${goal ? '<button class="btn" type="button" data-goal-clear>Remove goal</button>' : ''}</form>`;
-  if (!goal) return `<section class="goal"><h2>${year} reading goal</h2><p class="lede">You have finished ${num(finished)} so far this year. Set a goal and this page tracks it.</p>${form('Titles to finish this year')}<p class="hint">The goal is saved on this device only.</p></section>`;
+  if (!goal) return `<section class="goal"><h2>${year} Reading Goal</h2><p class="lede">You have finished ${num(finished)} so far this year. Set a goal and this page tracks it.</p>${form('Titles to finish this year')}<p class="hint">The goal is saved on this device only.</p></section>`;
   return goalMeter(year, finished, goal, `<details class="goal-edit"><summary>Change the goal</summary>${form('Titles to finish this year')}<p class="hint">The goal is saved on this device only.</p></details>`);
 }
 function goalMeter(year, finished, goal, footer) {
@@ -784,7 +841,7 @@ function goalMeter(year, finished, goal, footer) {
   const rate = (n) => (n >= 10 ? num(Math.round(n)) : String(Math.round(n * 10) / 10));
   const needText = now >= end || now < start ? '' : daysLeft >= 14 ? `, about ${rate(left / (daysLeft / 7))} a week from here` : `, about ${rate(left / daysLeft)} a day from here`;
   const endText = part > 0.1 && part < 1 && finished ? ` At this year’s pace the year ends on about ${num(Math.round(finished / part))}.` : '';
-  return `<section class="goal"><h2>${year} reading goal</h2>
+  return `<section class="goal"><h2>${SI('target')}${year} Reading Goal</h2>
     <p class="goal-n"><b>${num(finished)}</b> of ${num(goal)} titles <span>${pct}%</span></p>
     <div class="goal-bar" role="img" aria-label="${finished} of ${goal} finished"><i style="width:${pct}%"></i>${finished < goal ? `<u style="left:${Math.round((expected / goal) * 100)}%" title="Where you would be today at an even pace"></u>` : ''}</div>
     <p class="lede">${pace}${finished < goal ? ` ${num(goal - finished)} to go${needText}.${endText}` : ''}</p>
@@ -886,32 +943,66 @@ function statsPage() {
     const c = b.copies || [];
     copies[c.includes('hardcopy') && c.includes('ebook') ? 'both' : c.includes('hardcopy') ? 'hard' : c.includes('ebook') ? 'ebook' : 'none'] += 1;
   });
+  // listening time, from the lengths recorded on the audiobooks
+  const audios = books.filter((x) => x.format === 'Audiobook');
+  const timeOf = (list) => { const timed = list.filter((x) => minutesOf(x)); return { n: list.length, timed: timed.length, mins: timed.reduce((sum, x) => sum + minutesOf(x), 0) }; };
+  const heard = timeOf(audios.filter((x) => x.status === 'read')), waiting = timeOf(audios.filter((x) => x.status !== 'read')), everyAudio = timeOf(audios);
+  const gap = (t) => (t.timed === t.n ? '' : t.timed ? `. ${num(t.n - t.timed)} of them ${t.n - t.timed === 1 ? 'has' : 'have'} no length recorded, so the real total is higher` : '. None of these have a length recorded yet');
+  const listening = audios.length ? `<section class="vz-card"><h2>${SI('phones')}Listening Time</h2>
+      <div class="stiles in-card">
+        ${tile(waiting.timed ? fmtMinutes(waiting.mins) : '\u2013', 'Waiting to Be Heard', `${num(waiting.n)} ${waiting.n === 1 ? 'audiobook' : 'audiobooks'}${gap(waiting)}`)}
+        ${tile(heard.timed ? fmtMinutes(heard.mins) : '\u2013', 'Listened So Far', `${num(heard.n)} ${heard.n === 1 ? 'audiobook' : 'audiobooks'}${gap(heard)}`)}
+        ${tile(everyAudio.timed ? fmtMinutes(everyAudio.mins / everyAudio.timed) : '\u2013', 'A Typical Audiobook', everyAudio.timed ? `The average of the ${num(everyAudio.timed)} with a length` : 'No lengths recorded yet')}
+      </div>
+      ${heard.timed < heard.n && ownerHere() ? '<p class="hint vz-note">Add the length to an audiobook in the dashboard and its time is counted here.</p>' : ''}
+    </section>` : '';
   const older = first < cut - 1;
   const undatedNote = undated ? `<p class="hint vz-note">${num(undated)} finished ${undated === 1 ? 'title has' : 'titles have'} no finish date, so ${undated === 1 ? 'it is' : 'they are'} not in these charts.${ownerHere() ? ' <a href="admin.html#missing=finished">Add the dates in the dashboard</a>' : ''}</p>` : '';
 
-  return `<div class="wrap statpage">
-    <h1>Stats</h1>
-    ${goalCard(thisYear, (byYear.get(thisYear) || []).length)}
-    <section class="stiles">
-      ${tile(num(count.total), `Finished in ${year}`, `${splitText(count)}${against ? `. ${against}` : ''}`)}
-      ${tile(perMonth >= 10 ? num(Math.round(perMonth)) : String(Math.round(perMonth * 10) / 10), `A month on average in ${year}`, busiest.count.total ? `Busiest: ${busiest.long.split(' ')[0]}, with ${num(busiest.count.total)}` : '')}
-      ${tile(pages ? num(pages) : '–', `Pages in ${year}`, pages ? `Across the ${num(withPages.length)} of ${num(inYear.length)} with a page count${longest ? `. Longest: ${link(longest)} (${num(longest.pages)})` : ''}` : 'None of these have a page count yet')}
-      ${tile(num(read.length), 'Finished, all time', `${splitText(all)}${bestEver ? `. Best month: ${MONTHS[Number(bestEver[0].slice(5)) - 1]} ${bestEver[0].slice(0, 4)}, with ${num(bestEver[1])}` : ''}`)}
+  const yi = years.indexOf(year);
+  const yearNav = `<nav class="yearnav" aria-label="Year">
+      <button type="button" ${yi > 0 ? `data-year="${years[yi - 1]}"` : 'disabled'} aria-label="Earlier year">${ICON.left}</button>
+      <b>${year}</b>
+      <button type="button" ${yi < years.length - 1 ? `data-year="${years[yi + 1]}"` : 'disabled'} aria-label="Later year">${ICON.right}</button>
+    </nav>`;
+  const fig = (n, label, sub = '', icon = '') => `<div class="fig">${icon ? SI(icon) : ''}<b>${n}</b><span>${label}</span>${sub ? `<small>${sub}</small>` : ''}</div>`;
+  const goalHtml = year === thisYear ? goalCard(thisYear, (byYear.get(thisYear) || []).length) : '';
+  return `<div class="wrap statpage v2">
+    <header class="st-top"><h1>Stats</h1>${yearNav}</header>
+    <section class="st-hero${goalHtml ? '' : ' solo'}">
+      <svg class="st-mark" viewBox="0 0 170 110" aria-hidden="true"><rect x="6" y="20" width="21" height="78" rx="4"/><rect x="31" y="36" width="21" height="62" rx="4"/><rect x="56" y="10" width="23" height="88" rx="4"/><g transform="rotate(14 94 98)"><rect x="84" y="26" width="21" height="72" rx="4"/></g><rect x="0" y="100" width="118" height="6" rx="3"/></svg>
+      <div class="st-big">
+        <b>${num(count.total)}</b>
+        <div><h2>Finished in ${year}</h2><p>${splitText(count)}</p>${against ? `<p class="vs">${against}</p>` : ''}</div>
+      </div>
+      ${goalHtml}
     </section>
-    <section class="vz-card"><h2>Finished each year</h2><p class="hint">Pick a year to see its months.</p>${columnChart(yearCols, 'Year', fold)}
-      ${older ? `<p class="vz-more"><button type="button" data-statopt="years" data-val="${fold ? 'all' : ''}">${fold ? `Show every year since ${first}` : 'Show the last eight years only'}</button></p>` : ''}
-      ${undatedNote}
+    <section class="figs" aria-label="${year} in figures">
+      ${fig(perMonth >= 10 ? num(Math.round(perMonth)) : String(Math.round(perMonth * 10) / 10), 'A Month on Average', '', 'cal')}
+      ${fig(busiest.count.total ? num(busiest.count.total) : '–', 'Busiest Month', busiest.count.total ? busiest.long.split(' ')[0] : '', 'peak')}
+      ${fig(pages ? num(pages) : '–', 'Pages', pages ? `from ${num(withPages.length)} of ${num(inYear.length)} titles` : 'no page counts yet', 'pages')}
+      ${fig(longest ? num(longest.pages) : '–', 'Longest', longest ? link(longest) : '', 'book')}
     </section>
-    <section class="vz-card"><h2>${year}, month by month</h2><p class="hint">Pick a month to see what was finished in it.</p>
-      ${columnChart(monthCols, 'Month', true)}
-    </section>
-    ${recent.length ? `<section class="shelf-row" id="stat-row"><div class="row-head"><h2>${rowTitle}</h2>${month ? '<button type="button" data-month="">Show the whole year</button>' : '<a href="#/shelf/read">See the Read shelf</a>'}</div><div class="row">${recent.map(homeCard).join('')}</div>${shown.length > recent.length ? `<p class="hint">Showing the latest ${num(recent.length)} of ${num(shown.length)}.</p>` : ''}</section>` : ''}
-    <section class="vz-card"><h2>Everything read so far</h2>
-      ${shareBar('Kind', [['Books', all.book, 'book'], ['Comics', all.comic, 'comic'], ['Audiobooks', all.audio, 'audio']])}
-      ${shareBar('Language', [['Bengali', read.filter((b) => b.language === 'Bengali').length, 's1'], ['English', read.filter((b) => b.language === 'English').length, 's2']])}
-      ${shareBar('Copy of the books read', [['Hardcopy', copies.hard, 's1'], ['Ebook', copies.ebook, 's2'], ['Both', copies.both, 's3'], ['Not recorded', copies.none, 'none']])}
-    </section>
-    <section class="vz-card"><div class="rank-head"><h2>Most read</h2><div class="seg" role="group" aria-label="Count">${seg}</div></div>
+    <div class="st-two">
+      <section class="vz-card"><h2>${SI('bars')}Finished Each Year</h2><p class="hint">Pick a year to see its months.</p>${columnChart(yearCols, 'Year', fold)}
+        ${older ? `<p class="vz-more"><button type="button" data-statopt="years" data-val="${fold ? 'all' : ''}">${fold ? `Show every year since ${first}` : 'Show the last eight years only'}</button></p>` : ''}
+      </section>
+      <section class="vz-card"><h2>${SI('cal')}${year}, Month by Month</h2><p class="hint">Pick a month to see what was finished in it.</p>
+        ${columnChart(monthCols, 'Month', true)}
+      </section>
+    </div>
+    ${undatedNote}
+    ${recent.length ? `<section class="shelf-row" id="stat-row"><div class="row-head"><h2>${rowTitle}</h2>${month ? '<button type="button" data-month="">Show the whole year</button>' : `<a href="#/shelf/read">See the Read Shelf${ICON.right}</a>`}</div><div class="row">${recent.map(homeCard).join('')}</div>${shown.length > recent.length ? `<p class="hint">Showing the latest ${num(recent.length)} of ${num(shown.length)}.</p>` : ''}</section>` : ''}
+    <h2 class="st-div">${SI('stack')}All Time</h2>
+    <div class="st-two even">
+      <section class="vz-card"><div class="lead">${SI('check')}<b>${num(read.length)}</b><span>Finished So Far</span>${bestEver ? `<small>Best month: ${MONTHS[Number(bestEver[0].slice(5)) - 1]} ${bestEver[0].slice(0, 4)}, with ${num(bestEver[1])}</small>` : ''}</div>
+        ${shareBar('Kind', [['Books', all.book, 'book'], ['Comics', all.comic, 'comic'], ['Audiobooks', all.audio, 'audio']])}
+        ${shareBar('Language', [['Bengali', read.filter((b) => b.language === 'Bengali').length, 's1'], ['English', read.filter((b) => b.language === 'English').length, 's2']])}
+        ${shareBar('Copy of the Books Read', [['Hardcopy', copies.hard, 's1'], ['Ebook', copies.ebook, 's2'], ['Both', copies.both, 's3'], ['Not recorded', copies.none, 'none']])}
+      </section>
+      ${listening}
+    </div>
+    <section class="vz-card"><div class="rank-head"><h2>${SI('award')}Most Read</h2><div class="seg" role="group" aria-label="Count">${seg}</div></div>
       <div class="rank-cols">
         ${rank('Authors', top(authors), authorHref)}
         ${rank('Genres', top(genres), (g) => `#/genre/${genreKey(g)}`)}
@@ -925,16 +1016,17 @@ function statsPage() {
 // (ignoring capitals and extra spaces).
 function authorPage(name) {
   const key = norm(name);
-  const list = sortList(books.filter((b) => wroteIt(b, key)), SORT_AUTHOR);
-  if (!key || !list.length) return notFound();
-  const label = authorsOf(list[0].author).find((a) => norm(a) === key) || name;
+  const everything = books.filter((b) => wroteIt(b, key));
+  if (!key || !everything.length) return notFound();
+  const list = sortList(everything.filter(passes), SORT_AUTHOR);   // e.g. ?kind=audio: only this author's audiobooks
+  const label = authorsOf(everything[0].author).find((a) => norm(a) === key) || name;
   document.title = `${label} \u2013 Reading Ledger`;
   return `<div class="wrap">
     <p class="eyebrow">Author</p>
     <h1 class="${/[\u0980-\u09FF]/.test(label) ? 'bn' : ''}">${esc(label)}</h1>
-    <p class="lede">${list.length} ${list.length === 1 ? 'title' : 'titles'}</p>
-    <div class="filters">${sortSelect(SORT_AUTHOR)}</div>
-    ${gridHtml(list)}
+    <p class="lede">${num(list.length)} ${list.length === 1 ? 'title' : 'titles'}${list.length < everything.length ? ` of ${num(everything.length)}` : ''}</p>
+    ${chips(['lang', 'kind'], SORT_AUTHOR, list.length, everything.some((b) => b.format === 'Audiobook'))}
+    ${list.length ? gridHtml(list) : '<p class="empty">No titles match these filters yet.</p>'}
   </div>`;
 }
 
@@ -954,16 +1046,18 @@ function detailPage(id) {
   const link = audio && b.youtube_url && /^https?:\/\//i.test(b.youtube_url) ? b.youtube_url : '';
   const yt = link
     ? `<a class="btn primary block" href="${esc(link)}" target="_blank" rel="noopener noreferrer">${ICON.play}Listen on YouTube</a>` : '';
+  const finished = b.status === 'read' && fmtDate(b.finished_at) ? `${audio ? 'Listened' : 'Finished'} ${fmtDate(b.finished_at)}` : '';
   const facts = [
     ['Format', b.format],
     [audio ? 'Duration' : 'Pages', audio ? b.duration : b.pages],
     ['Published', b.pub_year],
     ['Language', b.language],
-    ['Status', STATUS[b.status]],
+    ['Status', statusWord(b)],
     ...(b.status === 'read' ? [['Date finished', fmtDate(b.finished_at)]] : []),
     ['Ownership', OWN[b.ownership]],
     ...(audio ? [] : [['Copies', (b.copies || []).filter((c) => COPY[c]).map((c) => COPY[c]).join(' and ')]]),
-  ].map(([k, v]) => `<tr><th scope="row">${k}</th><td>${v || v === 0 ? esc(v) : '\u2014'}</td></tr>`).join('');
+  ].filter(([, v]) => !audio || v || v === 0)      // an audiobook's empty rows are left out
+   .map(([k, v]) => `<tr><th scope="row">${k}</th><td>${v || v === 0 ? esc(v) : '\u2014'}</td></tr>`).join('');
   const seriesNo = b.series_no != null ? ` #${esc(b.series_no)}` : '';
   const bnSeries = /[\u0980-\u09FF]/.test(b.series || '') ? 'bn' : '';
   const arcPart = b.arc ? `${b.series ? ' \u00b7 part of ' : 'Part of '}<a href="${esc(arcHref(b.arc))}">${esc(b.arc)}</a>` : '';
@@ -977,44 +1071,123 @@ function detailPage(id) {
   const at = Math.max(0, siblings.findIndex((x) => x.id === b.id) - 1);
   const nearby = siblings.slice(Math.min(at, Math.max(0, siblings.length - 12)), Math.min(at, Math.max(0, siblings.length - 12)) + 12).filter((x) => x.id !== b.id);
   const moreSeries = nearby.length ? `<section class="shelf-row more-by" aria-label="More in ${esc(rowName)}">
-      <div class="row-head"><h2>More in <span class="${hasBn(rowName) ? 'bn' : ''}">${esc(rowName)}</span></h2><a href="${esc(rowHref)}">See all (${siblings.length})</a></div>
+      <div class="row-head"><h2>More in <span class="${hasBn(rowName) ? 'bn' : ''}">${esc(rowName)}</span><small>${num(siblings.length)}</small></h2><a href="${esc(rowHref)}">See all${ICON.right}</a></div>
       <div class="row">${nearby.map(seriesCard).join('')}</div>
     </section>` : '';
   // One "More by ..." row per author (at most three), each with that author's other titles.
   const writers = authorsOf(b.author);
+  const rowOf = (title, list, href, n) => (list.length ? `<section class="shelf-row more-by">
+      <div class="row-head"><h2>${title}${n == null ? '' : `<small>${num(n)}</small>`}</h2>${href ? `<a href="${esc(href)}">See all${ICON.right}</a>` : ''}</div>
+      <div class="row">${list.slice(0, 12).map(homeCard).join('')}</div>
+    </section>` : '');
+  // On a book's page: the author's other books in one row, the author's audiobooks in another (at most three authors).
+  // "See all" opens the author's page already narrowed to what the row shows.
   const moreBy = writers.slice(0, 3).map((name) => {
     const others = books.filter((x) => x.id !== b.id && wroteIt(x, norm(name))).sort(byTitle);
-    return others.length ? `<section class="shelf-row more-by" aria-label="More by ${esc(name)}">
-      <div class="row-head"><h2>More by <span class="${hasBn(name) ? 'bn' : ''}">${esc(name)}</span></h2><a href="${esc(authorHref(name))}">See all (${others.length + 1})</a></div>
-      <div class="row">${others.slice(0, 12).map(homeCard).join('')}</div>
-    </section>` : '';
+    const paper = others.filter((x) => x.format !== 'Audiobook'), heard = others.filter((x) => x.format === 'Audiobook');
+    const nm = `<span class="${hasBn(name) ? 'bn' : ''}">${esc(name)}</span>`;
+    // the same titles as the series row just above: no need to show them twice
+    const repeat = nearby.length && paper.every((x) => siblings.includes(x));
+    const onlyBooks = paper.every((x) => !isComics(x)) && !isComics(b);
+    return (repeat ? '' : rowOf(`More Books by ${nm}`, paper, `${authorHref(name)}${onlyBooks ? '?kind=book' : ''}`, paper.length + 1))
+      + rowOf(`Audiobooks by ${nm}`, heard, `${authorHref(name)}?kind=audio`, heard.length);
   }).join('');
-  const edit = ownerHere() ? `<a class="btn editbtn" href="admin.html#edit=${esc(b.id)}">${ICON.edit}Edit</a>` : '';
-  document.title = `${b.title} \u2013 Reading Ledger`;
-  return `<div class="wrap">
+  // ---- audiobook page: rows that keep you listening, and links into the rest of the library
+  let audioRows = '', twin = null;
+  if (audio) {
+    const bare = (t) => norm(String(t || '').replace(/\(.*?\)/g, ''));
+    twin = books.find((x) => x.format === 'Book' && bare(x.title) === bare(b.title)) || null;
+    audioRows = writers.slice(0, 2).map((name) => {
+      const mine = books.filter((x) => x.id !== b.id && wroteIt(x, norm(name)));
+      const heard = mine.filter((x) => x.format === 'Audiobook').sort(byTitle), paper = mine.filter((x) => x.format !== 'Audiobook').sort(byTitle);
+      const nm = `<span class="${hasBn(name) ? 'bn' : ''}">${esc(name)}</span>`;
+      // the same audiobooks as the series row just above: no need to show them twice
+      const repeat = nearby.length && heard.length && heard.every((x) => siblings.includes(x));
+      // "See all" opens the author's page already narrowed to what the row shows
+      const onlyBooks = paper.every((x) => !isComics(x));
+      return (repeat ? '' : rowOf(`More Audiobooks by ${nm}`, heard, `${authorHref(name)}?kind=audio`, heard.length + 1))
+        + rowOf(`Books by ${nm}`, paper, `${authorHref(name)}${onlyBooks ? '?kind=book' : ''}`, paper.length);
+    }).join('');
+    const mins = (x) => minutesOf(x) || 1e9;   // no length recorded: goes last
+    const waiting = books.filter((x) => x.format === 'Audiobook' && x.id !== b.id && x.status !== 'read').sort((x, y) => mins(x) - mins(y));
+    audioRows += rowOf('Up Next, Shortest First', waiting, '#/shelf/audio', null);   // no count: "See all" opens every audiobook, heard or not
+  }
+  // the one before and the one after this in its series
+  const here = siblings.findIndex((x) => x.id === b.id);
+  const step = (x, word) => (x ? `<a class="step${x.format === 'Audiobook' ? ' wide' : ''}" href="#/book/${esc(x.id)}"><span class="step-c">${coverHtml(x)}</span><span class="step-t"><small>${word}${x.series_no != null ? ` \u00b7 #${esc(x.series_no)}` : ''}</small><b class="${lc(x)}">${esc(x.title)}</b></span></a>` : '');
+  const stepNav = here >= 0 && siblings.length > 1 ? `<nav class="steps" aria-label="In ${esc(rowName)}">${step(siblings[here - 1], 'Previous')}${step(siblings[here + 1], 'Next')}</nav>` : '';
+  // where this one sits in its series, and how far through the series I am
+  const doneIn = siblings.filter((x) => x.status === 'read').length;
+  const inArcNow = arcMates.length > 1;
+  const place = inArcNow
+    ? (b.arc_no != null ? `Part ${esc(b.arc_no)} of ${num(siblings.length)}` : `${num(siblings.length)} parts`)
+    : (b.series_no != null ? `#${esc(b.series_no)} of ${num(siblings.length)}` : `${num(siblings.length)} titles`);
+  // a comic in a story arc usually belongs to a series as well: the arc leads (it is the reading order),
+  // and the series gets its own line underneath
+  const seriesToo = inArcNow && b.series ? inSeries(b.series) : [];
+  const alsoSeries = seriesToo.length ? `<p class="inseries-also">${b.series_no != null ? `Issue #${esc(b.series_no)} of` : 'Also in'} the series <a class="${hasBn(b.series) ? 'bn' : ''}" href="${esc(seriesHref(b.series))}">${esc(b.series)}</a><small>${num(seriesToo.length)} on the shelf · ${num(seriesToo.filter((x) => x.status === 'read').length)} read</small></p>` : '';
+  const seriesBox = here >= 0 && siblings.length > 1 ? `<section class="inseries"><h2 class="h3">${inArcNow ? 'In the Story Arc' : 'In the Series'} <a class="${hasBn(rowName) ? 'bn' : ''}" href="${esc(rowHref)}">${esc(rowName)}</a></h2>
+      <p class="inseries-n">${place} · ${num(doneIn)} read</p>
+      ${progressBar(doneIn, siblings.length)}
+      ${stepNav}
+      ${alsoSeries}
+    </section>` : (b.series && inSeries(b.series).length === 1 ? `<section class="inseries"><h2 class="h3">In the Series <a href="${esc(seriesHref(b.series))}">${esc(b.series)}</a></h2></section>` : '');
+  const genresHtml = (b.genres || []).length ? `<ul class="genres" aria-label="Genres">${b.genres.map((g) => {
+    const slug = genreKey(g);
+    const bn = /[\u0980-\u09FF]/.test(g) ? ' bn' : '';
+    return slug ? `<li class="gchip${bn}"><a href="#/genre/${esc(slug)}">${esc(g)}</a></li>` : `<li class="gchip${bn}">${esc(g)}</li>`;
+  }).join('')}</ul>` : '';
+  const authorHtml = `<p class="author ${lc(b)}">${writers.map((name) => `<a href="${esc(authorHref(name))}">${esc(name)}</a>`).join(', ') || esc(b.author)}</p>`;
+  const audioPage = () => `<div class="wrap">
     <div class="detail-top"><a class="backbtn" href="${esc(backHash)}" data-back>${ICON.left}Back to ${esc(backLabel)}</a>${edit}</div>
-    <article class="detail${audio ? ' audio' : ''}">
+    <article class="detail audio listen">
       <div class="detail-side">
-        ${link ? `<a class="ytlink" href="${esc(link)}" target="_blank" rel="noopener noreferrer" aria-label="Watch ${esc(b.title)} on YouTube">${coverHtml(b, true)}</a>` : coverHtml(b, true)}
-        ${yt}
+        ${link && ytId(link) ? `<button type="button" class="ytplay" data-yt="${esc(ytId(link))}" aria-label="Play ${esc(b.title)} here">${coverHtml(b, true)}</button>` : coverHtml(b, true)}
       </div>
-      <div>
-        <div class="dtags">${statusBadge(b)}${badge(b)}${copyBadges(b)}</div>
+      <header class="detail-head">
         <h1 class="${lc(b)}">${esc(b.title)}</h1>
-        <p class="author ${lc(b)}">${writers.map((name) => `<a href="${esc(authorHref(name))}">${esc(name)}</a>`).join(', ') || esc(b.author)}</p>
+        ${authorHtml}
         ${seriesLine}
         <p class="meta">${meta}</p>
-        ${(b.genres || []).length ? `<ul class="genres" aria-label="Genres">${b.genres.map((g) => {
-          const slug = genreKey(g);
-          const bn = /[\u0980-\u09FF]/.test(g) ? ' bn' : '';
-          return slug
-            ? `<li class="gchip${bn}"><a href="#/genre/${esc(slug)}">${esc(g)}</a></li>`
-            : `<li class="gchip${bn}">${esc(g)}</li>`;
-        }).join('')}</ul>` : ''}
+      </header>
+      <div class="detail-body">
+        <div class="dtags">${statusBadge(b)}${badge(b)}</div>
+        ${twin ? `<p class="twin">Also on the shelf as a book: <a class="${lc(twin)}" href="#/book/${esc(twin.id)}">${esc(twin.title)}</a></p>` : ''}
+        ${finished ? `<p class="meta">${finished}</p>` : ''}
         ${b.description ? `<p class="desc ${lc(b)}">${esc(b.description)}</p>` : ''}
-        <h2 class="h3">Book details</h2>
-        <table class="facts"><tbody>${facts}</tbody></table>
+        ${genresHtml}
       </div>
+      <aside class="detail-aside">
+        ${yt}${link && ytId(link) ? '<p class="hint yt-hint">Press play on the picture to listen here, or use the button to open YouTube.</p>' : ''}
+        <details class="facts-more"${window.matchMedia('(min-width: 901px)').matches ? ' open' : ''}><summary>Audiobook Details</summary><table class="facts"><tbody>${facts}</tbody></table></details>
+        ${stepNav}
+      </aside>
+    </article>
+    ${moreSeries}
+    ${audioRows}
+  </div>`;
+  const edit = ownerHere() ? `<a class="btn editbtn" href="admin.html#edit=${esc(b.id)}">${ICON.edit}Edit</a>` : '';
+  document.title = `${b.title} \u2013 Reading Ledger`;
+  if (audio) return audioPage();
+  return `<div class="wrap">
+    <div class="detail-top"><a class="backbtn" href="${esc(backHash)}" data-back>${ICON.left}Back to ${esc(backLabel)}</a>${edit}</div>
+    <article class="detail bookpage">
+      <div class="detail-side"><button type="button" class="coverzoom" data-zoom aria-label="See the cover full screen">${coverHtml(b, true)}</button></div>
+      <header class="detail-head">
+        <h1 class="${lc(b)}">${esc(b.title)}</h1>
+        ${authorHtml}
+        <p class="meta">${meta}</p>
+        <div class="dtags">${statusBadge(b)}${badge(b)}${copyBadges(b)}</div>
+      </header>
+      <div class="detail-body">
+        ${finished ? `<p class="meta fin">${finished}</p>` : ''}
+        ${b.description ? `<p class="desc ${lc(b)}${String(b.description).length > 420 ? ' clamp' : ''}">${esc(String(b.description).replace(/<br\s*\/?>/gi, '\n'))}</p>${String(b.description).length > 420 ? '<button type="button" class="desc-more" data-desc>Read more</button>' : ''}` : ''}
+        ${genresHtml}
+      </div>
+      <aside class="detail-aside">
+        ${seriesBox}
+        <details class="facts-more"${window.matchMedia('(min-width: 1001px)').matches ? ' open' : ''}><summary>Book Details</summary><table class="facts"><tbody>${facts}</tbody></table></details>
+      </aside>
     </article>
     ${moreSeries}
     ${moreBy}
@@ -1036,8 +1209,8 @@ function searchPage(text) {
   const hits = books.filter((b) => words.every((w) => hay(b).includes(w)));
   const rank = (b) => (norm(b.title).includes(q) ? 0 : norm(b.author).includes(q) ? 1 : 2);
   hits.sort((a, b) => rank(a) - rank(b));               // the sort is stable: newest first within each group
-  return `<div class="wrap"><h1>Search results</h1>
-    <p class="lede">${hits.length} ${hits.length === 1 ? 'title matches' : 'titles match'} \u201c${esc(text.trim())}\u201d</p>
+  return `<div class="wrap"><h1>Search Results</h1>
+    <p class="lede">${num(hits.length)} ${hits.length === 1 ? 'title matches' : 'titles match'} \u201c${esc(text.trim())}\u201d</p>
     ${hits.length ? gridHtml(hits, haveCard) : '<p class="empty">Nothing found. Try a different spelling or part of the name.</p>'}
   </div>`;
 }
@@ -1062,17 +1235,18 @@ function setNav(active) {
 }
 
 function draw() {
-  if (state === 'setup') { setNav(''); app.innerHTML = stateBox('<h1>Almost there</h1><p>Open <code>js/config.js</code> and paste your Supabase project URL and publishable key. The README explains how.</p>'); return; }
+  if (state === 'setup') { setNav(''); app.innerHTML = stateBox('<h1>Almost There</h1><p>Open <code>js/config.js</code> and paste your Supabase project URL and publishable key. The README explains how.</p>'); return; }
   if (state === 'loading') { app.innerHTML = stateBox('<p>Loading the shelf\u2026</p>'); return; }
   if (state === 'error') {
-    app.innerHTML = stateBox('<h1>The shelf is out of reach</h1><p>We couldn\u2019t load the books. Check your connection, or your Supabase project may be paused.</p><button class="btn primary" type="button" data-retry>Try again</button>');
+    app.innerHTML = stateBox('<h1>The Shelf Is Out of Reach</h1><p>We couldn\u2019t load the books. Check your connection, or your Supabase project may be paused.</p><button class="btn primary" type="button" data-retry>Try again</button>');
     return;
   }
   grids = {};
   const { parts, params } = route();
   const page = parts[0] || 'home';
   const opt = (name) => params.get(name) || '';
-  filters = { lang: opt('lang'), own: opt('own'), fmt: opt('fmt'), copies: opt('copies'), type: opt('type') };
+  // (older links said type=comic or fmt=Audiobook; they still work)
+  filters = { lang: opt('lang'), own: opt('own'), copies: opt('copies'), kind: opt('kind') || (opt('fmt') === 'Audiobook' ? 'audio' : opt('type')) };
   sortKey = opt('sort');
   if (page === 'search') { setNav(''); app.innerHTML = searchPage(opt('q')); return; }
   if (page === 'book') { setNav('books'); app.innerHTML = detailPage(parts[1] || ''); return; }
@@ -1104,12 +1278,13 @@ function draw() {
 // Draw the page, then scroll the shelf bar so the current shelf is in view (matters on phones).
 function render() {
   draw();
+  markOwner();
   watchMore();
   const note = document.getElementById('offline-note');
   if (offline && state === 'ready' && !note) {
     app.insertAdjacentHTML('beforebegin', '<p id="offline-note" class="offline-note" role="status">No connection. Showing the shelf as it was last saved on this device.</p>');
   } else if (!offline && note) note.remove();
-  const bar = document.querySelector('.shelfbar-in');
+  const bar = document.querySelector('.stabs');
   const cur = bar && bar.querySelector('[aria-current]');
   if (cur) bar.scrollLeft = cur.offsetLeft - (bar.clientWidth - cur.offsetWidth) / 2;
   // A chart wider than the screen opens on the picked year, not on the oldest one.
@@ -1279,6 +1454,8 @@ app.addEventListener('change', (e) => {
     try { if (start.checked) localStorage.setItem('rl-start', location.hash); else localStorage.removeItem('rl-start'); } catch (err) { /* storage blocked */ }
     return;
   }
+  const pick = e.target.closest('[data-fsel]');
+  if (pick) { setOption(pick.dataset.fsel, pick.value); redraw(`[data-fsel="${pick.dataset.fsel}"]`); return; }
   const sel = e.target.closest('[data-sort]');
   if (!sel) return;
   setOption('sort', sel.value === sel.dataset.default ? '' : sel.value);
@@ -1313,6 +1490,31 @@ app.addEventListener('pointerup', (e) => {
   if (Math.abs(dx) > 45) { swiped = true; heroMove(dx < 0 ? 1 : -1); setTimeout(() => { swiped = false; }, 60); }
 });
 app.addEventListener('click', (e) => {
+  const zoom = e.target.closest('[data-zoom]');
+  if (zoom) {      // the cover, as large as the screen allows; a tap anywhere (or Escape) closes it
+    const box = document.createElement('dialog');
+    box.className = 'coverbox';
+    const img = zoom.querySelector('img');
+    box.innerHTML = `<button type="button" class="coverbox-x" aria-label="Close">\u00d7</button>${img ? `<img src="${esc(img.currentSrc || img.src)}" alt="${esc(img.alt)}">` : `<div class="coverbox-gen cover">${zoom.querySelector('.gencover').outerHTML}</div>`}`;
+    box.addEventListener('click', () => box.close());
+    box.addEventListener('close', () => { box.remove(); zoom.focus({ preventScroll: true }); });
+    document.body.append(box);
+    box.showModal();
+    return;
+  }
+  const descBtn = e.target.closest('[data-desc]');
+  if (descBtn) { const folded = descBtn.previousElementSibling.classList.toggle('clamp'); descBtn.textContent = folded ? 'Read more' : 'Show less'; return; }
+  const play = e.target.closest('[data-yt]');
+  if (play) {      // play the audiobook right here instead of leaving for YouTube
+    const frame = document.createElement('iframe');
+    frame.className = 'ytframe';
+    frame.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(play.dataset.yt)}?autoplay=1&rel=0`;
+    frame.title = play.getAttribute('aria-label') || 'Audiobook';
+    frame.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
+    frame.allowFullscreen = true;
+    play.replaceWith(frame);
+    return;
+  }
   const step = e.target.closest('[data-cf]');
   if (step) { heroMove(step.dataset.cf === 'next' ? 1 : -1); return; }
   const card = e.target.closest('.cf-card');
