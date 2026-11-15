@@ -105,7 +105,9 @@ The installed app is the same site and the same database, so anything you add in
 ## Working in the dashboard
 
 - **Edit from the site:** while you are signed in, every book page on the public site shows an **Edit** button that opens that book's form. Saving or closing takes you back to the book.
-- **Count cards** at the top filter the list when clicked. Under the search box there are more filters (format, language, what is missing) and the sort order.
+- **Open a book** by clicking its row (on a phone, tap it). The tick box and the status menu in a row work on their own.
+- **Needs attention** counters under the count cards show how many books lack a cover, a genre or a finish date; click one to see just those.
+- **Count cards** at the top filter the list when clicked. Under the search box there are more filters (type, language, what is missing) and the sort order; on a wide screen the Title and Author headings sort the list too.
 - **Reading status** can be changed right in the list. Choosing *Read* fills in today as the finish date if the book has none.
 - **Change many books at once:** tick books (or tick the box in the table heading for all of them), then use the bar at the bottom to add or remove a genre, or set status, ownership, language, copies or series.
 - **Delete** is inside the book's form, at the bottom left.

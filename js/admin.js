@@ -78,6 +78,7 @@ async function showDash() {
   shown = true;
   $('login').hidden = true;
   $('dash').hidden = false;
+  setNavHeight();
   await refresh();
   openFromLink();
 }
@@ -126,7 +127,7 @@ async function refresh() {
   catch (err) { $('list-msg').textContent = ''; handleErr(err); }
 }
 
-function renderAll() { renderStats(); renderRows(); renderBulk(); }
+function renderAll() { renderStats(); renderAttention(); renderRows(); renderBulk(); }
 
 // Has the database got the "series" columns yet? (They are added by a small SQL snippet: Tools > Series.)
 const hasSeries = () => books.length > 0 && 'series' in books[0];
@@ -149,6 +150,21 @@ function renderStats() {
     return `<button type="button" class="stat" data-stat="${i}" aria-pressed="${on}"><b>${books.filter(test).length}</b><span class="l-full">${full}</span><span class="l-short" aria-hidden="true">${short}</span></button>`;
   }).join('');
 }
+// "Needs attention": how many books lack something. Tapping a counter shows just those books; tapping it again clears it.
+const ATTENTION = [['cover', 'no cover'], ['genre', 'no genre'], ['finished', 'read, no finish date'], ['author', 'unknown author']];
+function renderAttention() {
+  const now = $('fm').value;
+  const chips = ATTENTION.map(([key, label]) => [key, label, books.filter(MISSING[key]).length]).filter(([, , n]) => n > 0);
+  $('attn').innerHTML = chips.length ? `<span class="attn-l">Needs attention</span>${chips.map(([key, label, n]) =>
+    `<button type="button" class="chip attn-chip" data-attn="${key}" aria-pressed="${now === key}"><b>${n.toLocaleString()}</b> ${label}</button>`).join('')}` : '';
+}
+$('attn').addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-attn]');
+  if (!chip) return;
+  $('fm').value = $('fm').value === chip.dataset.attn ? '' : chip.dataset.attn;
+  filtersChanged();
+});
+
 $('stats').addEventListener('click', (e) => {
   const card = e.target.closest('[data-stat]');
   if (!card) return;
@@ -164,7 +180,12 @@ let listLimit = PAGE_SIZE;
 
 // ----- which books the list shows, and in what order -----
 const collator = new Intl.Collator(['bn', 'en'], { numeric: true, sensitivity: 'base' });
+const isComic = (b) => (b.genres || []).some((g) => /comic|manga|graphic novel/i.test(g));
+const kindOf = (b) => (b.format === 'Audiobook' ? 'Audiobook' : isComic(b) ? 'Comic' : 'Book');
+const noCover = (b) => !coverOf(b) && !(b.format === 'Audiobook' && b.youtube_url);
 const MISSING = {
+  cover: noCover,
+  author: (b) => /^unknown$/i.test(String(b.author || '').trim()),
   genre: (b) => !(b.genres || []).length,
   finished: (b) => b.status === 'read' && !b.finished_at,
   year: (b) => !b.pub_year,
@@ -180,8 +201,8 @@ function matching() {
   const q = norm($('s').value);
   const st = $('sf').value, fmt = $('ff').value, lang = $('fl').value, miss = MISSING[$('fm').value];
   const list = books.filter((b) =>
-    (!st || (st === 'nocover' ? !coverOf(b) && !(b.format === 'Audiobook' && b.youtube_url) : b.status === st)) &&
-    (!fmt || b.format === fmt) && (!lang || b.language === lang) && (!miss || miss(b)) &&
+    (!st || (st === 'nocover' ? noCover(b) : b.status === st)) &&
+    (!fmt || (fmt === 'Book' ? b.format === 'Book' : fmt === 'Plain' ? kindOf(b) === 'Book' : kindOf(b) === fmt)) && (!lang || b.language === lang) && (!miss || miss(b)) &&
     (!q || norm(b.title).includes(q) || norm(b.author).includes(q) || norm(b.series).includes(q) || norm(b.arc).includes(q)));
   const order = ORDER[$('fo').value];
   return order ? list.sort(order) : list;                 // books arrive newest first already
@@ -191,61 +212,66 @@ function matching() {
 const picked_ids = new Set();
 
 // The reading status is a small menu right in the list: change it without opening the form.
-const quickStatus = (b) => `<select class="qs st-${esc(b.status)}" data-qs="${esc(b.id)}" aria-label="Reading status of ${esc(b.title)}">${
-  Object.entries(STATUS).map(([k, label]) => `<option value="${k}"${k === b.status ? ' selected' : ''}>${label}</option>`).join('')}</select>`;
+// (Phones get shorter words, so the menu fits beside the title.)
+const SHORT_STATUS = { want: 'To read', reading: 'Reading', read: 'Read' };
+const quickStatus = (b, short = false) => `<select class="qs st-${esc(b.status)}" data-qs="${esc(b.id)}" aria-label="Reading status of ${esc(b.title)}">${
+  Object.entries(STATUS).map(([k, label]) => `<option value="${k}"${k === b.status ? ' selected' : ''}>${short ? SHORT_STATUS[k] : label}</option>`).join('')}</select>`;
+
+// The small line under a title: the series (only when the title does not already say it) and the story arc.
+function subLine(b) {
+  const parts = [];
+  if (b.series && !norm(b.title).includes(norm(b.series))) parts.push(`${b.series}${b.series_no != null ? ` #${b.series_no}` : ''}`);
+  if (b.arc) parts.push(`${b.arc}${b.arc_no != null ? ` · part ${b.arc_no}` : ''}`);
+  return parts.join(' · ');
+}
 
 function renderRows() {
   const list = matching();
   const matches = list.length;
   list.length = Math.min(list.length, listLimit);     // draw only the first batch
   const pick = (b) => `<input type="checkbox" class="pickbox" data-pick="${esc(b.id)}" aria-label="Select ${esc(b.title)}"${picked_ids.has(String(b.id)) ? ' checked' : ''}>`;
-  const actions = (b) => `
-        <button class="btn" type="button" data-act="edit" data-id="${esc(b.id)}">${ICON.edit}Edit</button>
-        <a class="btn" href="./#/book/${esc(b.id)}" aria-label="View ${esc(b.title)} on the site" title="View on the site">${ICON.eye}<span class="view-l">View</span></a>`;
-  const seriesLine = (b) => (b.series || b.arc ? `<span class="in-series">${[b.series ? `${esc(b.series)}${b.series_no != null ? ' #' + esc(b.series_no) : ''}` : '', b.arc ? esc(b.arc) : ''].filter(Boolean).join(' \u00b7 ')}</span>` : '');
   const info = (b) => {
     const audio = b.format === 'Audiobook';
     return {
       audio,
       bn: b.language === 'Bengali' ? 'bn' : '',
       url: (audio && ytThumb(b.youtube_url, 'mqdefault')) || coverOf(b),
+      sub: subLine(b),
     };
   };
-  // Wide screens: a table.
+  // Wide screens: a table. Clicking anywhere on a row opens the book's form.
   $('rows').innerHTML = list.map((b) => {
-    const { audio, bn, url } = info(b);
-    return `<tr>
+    const { audio, bn, url, sub } = info(b);
+    return `<tr data-row="${esc(b.id)}" tabindex="0" aria-label="Edit ${esc(b.title)}">
       <td class="pick">${pick(b)}</td>
       <td><div class="thumb${audio ? ' wide' : ''}">${url ? `<img src="${esc(url)}" alt="" loading="lazy">` : ''}</div></td>
-      <td class="${bn}">${esc(b.title)}${seriesLine(b)}</td>
-      <td class="${bn}">${esc(b.author)}</td>
-      <td>${esc(b.format)}</td>
+      <td class="t-title ${bn}"><span class="t-main">${esc(b.title)}</span>${sub ? `<span class="in-series">${esc(sub)}</span>` : ''}</td>
+      <td class="t-author ${bn}"><span class="t-main">${esc(b.author)}</span></td>
+      <td>${kindOf(b)}</td>
       <td>${quickStatus(b)}</td>
       <td>${badge(b)}</td>
-      <td class="acts">${actions(b)}
-      </td></tr>`;
+      <td class="acts"><button class="btn" type="button" data-act="edit" data-id="${esc(b.id)}" aria-label="Edit ${esc(b.title)}" title="Edit">${ICON.edit}</button><a class="btn" href="./#/book/${esc(b.id)}" aria-label="View ${esc(b.title)} on the site" title="View on the site">${ICON.eye}</a></td></tr>`;
   }).join('');
-  // Phones: one card per book (cover, title, author, tags, then big Edit / View buttons).
+  // Phones: one compact row per book. Tapping the row opens the form; the status menu and the tick box work on their own.
   $('cards').innerHTML = list.map((b) => {
-    const { audio, bn, url } = info(b);
-    return `<article class="bcard">
-      <div class="bc-main">
-        <div class="thumb${audio ? ' wide' : ''}">${url ? `<img src="${esc(url)}" alt="" loading="lazy">` : ''}</div>
-        <div class="bc-info">
-          <h3 class="bc-title ${bn}">${esc(b.title)}</h3>
-          <p class="bc-author ${bn}">${esc(b.author)}${seriesLine(b)}</p>
-          <div class="bc-tags">
-            <span class="badge fmt">${audio ? ICON.phones : ICON.book}${esc(b.format)}</span>
-            ${quickStatus(b)}
-            ${badge(b)}
-          </div>
-        </div>
-        ${pick(b)}
-      </div>
-      <div class="bc-actions">${actions(b)}
-      </div>
+    const { audio, bn, url, sub } = info(b);
+    return `<article class="brow" data-row="${esc(b.id)}">
+      ${pick(b)}
+      <div class="thumb${audio ? ' wide' : ''}">${url ? `<img src="${esc(url)}" alt="" loading="lazy">` : ''}</div>
+      <button type="button" class="br-info" data-act="edit" data-id="${esc(b.id)}" aria-label="Edit ${esc(b.title)}">
+        <span class="br-title ${bn}">${esc(b.title)}</span>
+        <span class="br-author ${bn}">${esc(b.author)}</span>
+        <span class="br-meta">${[kindOf(b), OWN[b.ownership], sub].filter(Boolean).map(esc).join(' · ')}</span>
+      </button>
+      ${quickStatus(b, true)}
     </article>`;
   }).join('');
+  // the column headings show which one the list is sorted by
+  document.querySelectorAll('.th-sort').forEach((el) => {
+    const on = $('fo').value === el.dataset.sort;
+    el.setAttribute('aria-pressed', String(on));
+    el.closest('th').setAttribute('aria-sort', on ? 'ascending' : 'none');
+  });
   // "Showing 100 of 2,443" + a button for the next 100
   const more = matches - list.length;
   $('more-wrap').hidden = more <= 0;
@@ -259,7 +285,7 @@ function renderRows() {
   $('pick-all').checked = matches > 0 && matching().every((b) => picked_ids.has(String(b.id)));
 }
 
-function filtersChanged() { listLimit = PAGE_SIZE; renderStats(); renderRows(); renderBulk(); }
+function filtersChanged() { listLimit = PAGE_SIZE; renderStats(); renderAttention(); renderRows(); renderBulk(); }
 ['sf', 'ff', 'fl', 'fm', 'fo'].forEach((id) => $(id).addEventListener('change', filtersChanged));
 $('clear-filters').addEventListener('click', () => { ['s', 'sf', 'ff', 'fl', 'fm'].forEach((id) => { $(id).value = ''; }); filtersChanged(); });
 
@@ -284,12 +310,40 @@ window.addEventListener('scroll', () => {
 }, { passive: true });
 $('more-btn').addEventListener('click', () => { listLimit += PAGE_SIZE; renderRows(); });
 
+// Open the form from a row. The Edit button always works; a click elsewhere on a table row works too,
+// unless it landed on something with its own job (the tick box, the status menu, the View link).
 function onRowAction(e) {
   const btn = e.target.closest('button[data-act]');
-  if (!btn) return;
-  const book = books.find((b) => String(b.id) === btn.dataset.id);
+  const row = e.target.closest('tr[data-row]') || (e.target.closest('.brow .thumb') && e.target.closest('.brow'));
+  if (!btn && (!row || e.target.closest('a, button, select, input, label'))) return;
+  if (!btn && String(window.getSelection()) !== '') return;        // the click ended a text selection: leave it be
+  const id = btn ? btn.dataset.id : row.dataset.row;
+  const book = books.find((b) => String(b.id) === id);
   if (book) openPanel(book);
 }
+$('rows').addEventListener('keydown', (e) => {                   // Enter on a focused row opens it
+  if (e.key !== 'Enter' || e.target.tagName !== 'TR') return;
+  const book = books.find((b) => String(b.id) === e.target.dataset.row);
+  if (book) openPanel(book);
+});
+// Clicking a column heading sorts by it; clicking it again goes back to newest first.
+document.querySelector('table.list thead').addEventListener('click', (e) => {
+  const th = e.target.closest('.th-sort');
+  if (!th) return;
+  $('fo').value = $('fo').value === th.dataset.sort ? 'added' : th.dataset.sort;
+  filtersChanged();
+});
+// The floating bar on phones presses the matching button in the top bar.
+$('adm-bar').addEventListener('click', (e) => {
+  const item = e.target.closest('[data-bar]');
+  if (!item) return;
+  if (item.dataset.bar === 'top') window.scrollTo({ top: 0, behavior: 'smooth' });
+  else $(item.dataset.bar).click();
+});
+// The table's headings stick below the top bar, so they need its height.
+const topBar = document.querySelector('.adm-top');
+const setNavHeight = () => document.documentElement.style.setProperty('--nav-h', `${topBar.offsetHeight}px`);
+window.addEventListener('resize', setNavHeight);
 $('rows').addEventListener('click', onRowAction);
 $('cards').addEventListener('click', onRowAction);
 
@@ -534,6 +588,8 @@ function openPanel(book) {
   $('arc-list').innerHTML = [...new Set(books.map((x) => x.arc).filter(Boolean))].sort(collator.compare).map((x) => `<option value="${esc(x)}">`).join('');
   $('series-list').innerHTML = [...new Set(books.map((x) => x.series).filter(Boolean))].sort(collator.compare).map((x) => `<option value="${esc(x)}">`).join('');
   $('delete-book').hidden = !book;
+  $('panel-view').hidden = !book;
+  if (book) $('panel-view').href = `./#/book/${encodeURIComponent(book.id)}`;
   syncStatus();
   haveCopies = [...(b.copies || [])];
   renderCopies();

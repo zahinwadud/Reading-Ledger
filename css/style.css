@@ -1073,3 +1073,104 @@ button.vz-col { cursor: pointer; }
   #import-btn svg, #tools-btn svg { width: 17px; height: 17px; }
 }
 .btn.theme-btn svg { margin: 0; }   /* the light/dark button has no label, on any screen size */
+
+/* =====================================================================
+   Dashboard, second pass: the public site's top bar, attention counters,
+   a tighter table, compact rows and a floating bar on phones
+   ===================================================================== */
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.adm-top .top-in { flex-wrap: nowrap; }
+.adm-title { margin: 0 auto 0 0; font-size: 20px; line-height: 1.2; white-space: nowrap; }
+.adm-main, .adm-util { display: flex; align-items: center; gap: var(--s1); }
+.adm-util { padding-left: var(--s2); margin-left: var(--s1); border-left: 1px solid var(--line); }
+.adm-top .btn { white-space: nowrap; }
+.adm-wrap { padding-top: var(--s3); }
+.adm-bar { display: none; }
+.fab { display: none !important; }
+
+/* counters for books that lack something */
+.attn { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: calc(var(--s1) * -1) 0 var(--s3); }
+.attn:empty { display: none; }
+.attn-l { font: 600 12px var(--ui); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-right: 4px; }
+.attn-chip { font-size: 13px; padding: 5px 12px; color: var(--muted); }
+.attn-chip b { color: var(--ink); font-weight: 700; }
+.attn-chip[aria-pressed="true"] b { color: inherit; }
+.attn-chip[aria-pressed="true"] { color: var(--on-accent); }
+
+/* the table: more rows on screen, headings that stay in view, a click on a row opens it */
+@media (min-width: 761px) {
+  .table-wrap { overflow: visible; }
+  .list th { position: sticky; top: var(--nav-h, 57px); z-index: 5; background: var(--surface); box-shadow: 0 1px 0 var(--line); }
+  .list thead tr:first-child th:first-child { border-top-left-radius: var(--r); }
+  .list thead tr:first-child th:last-child { border-top-right-radius: var(--r); }
+}
+.list th, .list td { padding: 5px 10px; }
+.list th { padding-top: 8px; padding-bottom: 8px; }
+.list tbody tr { cursor: pointer; }
+.list tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.list tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.list .thumb { width: 26px; }
+.list .thumb.wide { width: 46px; }
+.t-title { max-width: 380px; } .t-author { max-width: 260px; }
+.t-main { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow: hidden; overflow-wrap: anywhere; }
+.t-title .t-main { font-weight: 600; }
+.list .in-series { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.th-sort { font: inherit; color: inherit; background: none; border: 0; padding: 4px 0; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.th-sort::after { content: "\2195"; font-size: 11px; opacity: .45; }
+.th-sort:hover { color: var(--ink); }
+.th-sort[aria-pressed="true"] { color: var(--accent); }
+.th-sort[aria-pressed="true"]::after { content: "\2191"; opacity: 1; }
+.list .acts { text-align: right; }
+.list .acts .btn { padding: 6px 8px; margin-left: 4px; }
+.list .acts .btn svg { margin: 0; }
+.list .qs { font-size: 12px; padding-top: 4px; padding-bottom: 4px; }
+.list .badge { font-size: 12px; }
+.dlg-head #panel-view { margin-left: auto; padding: 8px 12px; text-decoration: none; }
+
+@media (max-width: 760px) {
+  /* top bar: brand, title, and three small buttons; the main actions are in the bar at the bottom */
+  .adm-top { position: static; }
+  .adm-top .top-in { gap: var(--s1); padding: var(--s1) 12px; }
+  .adm-main { display: none; }
+  .adm-util { border-left: 0; padding-left: 0; margin-left: 0; gap: 6px; }
+  .adm-util .btn { width: 44px; height: 44px; padding: 0; display: inline-grid; place-items: center; flex: none; }
+  .adm-util .hd-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .adm-util .hd-ic { display: block; }
+  .adm-util .btn svg { width: 20px; height: 20px; margin: 0; }
+  .adm-wrap { padding-top: var(--s2); padding-bottom: 96px; }
+  .attn { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px var(--s2); padding: 0 16px; }
+  .attn::-webkit-scrollbar { display: none; }
+  .attn-chip { flex: none; min-height: 36px; }
+  .attn-l { flex: none; }
+
+  /* one compact row per book */
+  .cards { gap: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .brow { display: grid; grid-template-columns: 24px 40px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; min-height: 68px; }
+  .brow + .brow { border-top: 1px solid var(--line); }
+  .brow .pickbox { width: 22px; height: 22px; }
+  .brow .thumb { width: 40px; cursor: pointer; }
+  .brow .thumb.wide { width: 40px; aspect-ratio: 1; }
+  .br-info { display: grid; gap: 1px; min-width: 0; padding: 4px 0; text-align: left; background: none; border: 0; color: inherit; font: inherit; cursor: pointer; }
+  /* up to two lines, so an issue number at the end of a long title is not cut off */
+  .br-title { font: 600 15px/1.3 'Literata', Georgia, serif; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+  .br-title.bn, .br-author.bn { font-family: 'Noto Serif Bengali', 'Literata', Georgia, serif; }
+  .br-author, .br-meta { font: 13px/1.35 var(--ui); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .br-meta { font-size: 12px; }
+  .brow .qs { font-size: 12px; min-height: 34px; padding: 4px 22px 4px 10px; background-position: right 5px center; }
+
+  /* floating bar, like the public site's */
+  .adm-bar {
+    display: grid; grid-template-columns: repeat(4, 1fr); position: fixed; left: 12px; right: 12px; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); z-index: 20;
+    padding: 4px; border-radius: 22px; background: var(--surface); border: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, .22), 0 1px 3px rgba(0, 0, 0, .12);
+  }
+  .adm-bar button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 52px; border: 0; border-radius: 18px; background: none; cursor: pointer; font: 600 11px var(--ui); letter-spacing: .02em; color: color-mix(in srgb, var(--ink) 72%, transparent); }
+  .adm-bar button svg { width: 22px; height: 22px; }
+  .adm-bar button[aria-current="page"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, transparent); }
+  .adm-bar button[data-bar="add"] { color: var(--on-accent); background: var(--accent); }
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .adm-bar { background: color-mix(in srgb, var(--surface) 62%, transparent); -webkit-backdrop-filter: blur(20px) saturate(1.8); backdrop-filter: blur(20px) saturate(1.8); }
+  }
+  body.bulk-on .adm-bar { display: none; }
+  body:has(dialog[open]) .adm-bar { display: none; }
+}
