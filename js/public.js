@@ -1051,6 +1051,11 @@ function render() {
   const bar = document.querySelector('.shelfbar-in');
   const cur = bar && bar.querySelector('[aria-current]');
   if (cur) bar.scrollLeft = cur.offsetLeft - (bar.clientWidth - cur.offsetWidth) / 2;
+  // A chart wider than the screen opens on the picked year, not on the oldest one.
+  for (const on of app.querySelectorAll('.vz-scroll .vz-col.on')) {
+    const sc = on.closest('.vz-scroll');
+    if (sc.scrollWidth > sc.clientWidth) sc.scrollLeft = on.offsetLeft + on.closest('.vz-plot').offsetLeft - (sc.clientWidth - on.offsetWidth) / 2;
+  }
 }
 
 // Show the saved copy of the shelf at once (if this browser has one), then fetch the current shelf
@@ -1263,7 +1268,7 @@ app.addEventListener('click', (e) => {
     return;
   }
   const yearBtn = e.target.closest('[data-year]');
-  if (yearBtn) { setOption('year', yearBtn.dataset.year); const y = window.scrollY; render(); window.scrollTo({ top: y, behavior: 'instant' }); const again = app.querySelector(`[data-year="${yearBtn.dataset.year}"]`); if (again) again.focus({ preventScroll: true }); return; }
+  if (yearBtn) { setOption('year', yearBtn.dataset.year); const y = window.scrollY; const sideways = [...app.querySelectorAll('.vz-scroll')].map((el) => el.scrollLeft); render(); window.scrollTo({ top: y, behavior: 'instant' }); app.querySelectorAll('.vz-scroll').forEach((el, i) => { if (i === 0 && sideways[i] != null) el.scrollLeft = sideways[i]; }); const again = app.querySelector(`[data-year="${yearBtn.dataset.year}"]`); if (again) again.focus({ preventScroll: true }); return; }
   if (e.target.closest('[data-goal-clear]')) {
     const form = e.target.closest('[data-goal]');
     try { localStorage.removeItem(`rl-goal-${form.dataset.goal}`); } catch (err) { /* storage blocked */ }
