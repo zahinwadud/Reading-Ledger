@@ -589,7 +589,7 @@ body:has(dialog[open]) { overflow: hidden; }
   .tools select { flex: none; width: 112px; }
 
   /* the form fills the whole screen */
-  #panel, #import-panel { width: 100%; max-width: none; height: 100%; max-height: none; margin: 0; border-radius: 0; }
+  #panel, #import-panel, #tools-panel { width: 100%; max-width: none; height: 100%; max-height: none; margin: 0; border-radius: 0; }
   .dlg-in { height: 100vh; height: 100dvh; max-height: none; }
   .dlg-head { padding-left: var(--s2); padding-top: calc(8px + env(safe-area-inset-top, 0px)); }
   .dlg-body { padding: var(--s2); }
@@ -1174,3 +1174,4 @@ button.vz-col { cursor: pointer; }
   body.bulk-on .adm-bar { display: none; }
   body:has(dialog[open]) .adm-bar { display: none; }
 }
+.form-actions:empty { display: none; }   /* a screen with no buttons should not leave an empty strip */
