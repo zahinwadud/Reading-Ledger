@@ -88,6 +88,12 @@ async function showDash() {
 let returnTo = '';
 function openFromLink() {
   if (location.hash === '#goal') { history.replaceState(null, '', location.pathname + location.search); openTool('goal'); return; }
+  const miss = location.hash.match(/^#missing=([a-z]+)$/);
+  if (miss) {          // e.g. the Stats page links to the finished titles that have no finish date
+    history.replaceState(null, '', location.pathname + location.search);
+    if (MISSING[miss[1]]) { $('fm').value = miss[1]; filtersChanged(); }
+    return;
+  }
   const m = location.hash.match(/^#edit=(.+)$/);
   if (!m) return;
   history.replaceState(null, '', location.pathname + location.search);   // use the link once

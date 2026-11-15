@@ -719,7 +719,7 @@ const splitText = (c) => KINDS.filter(([k]) => c[k]).map(([k, label]) => `${num(
 
 // A stacked column chart: one column per label, one segment per kind.
 // columns = [{ label, long, count: {book, comic, audio, total}, key?, on? }]
-function columnChart(columns, title) {
+function columnChart(columns, title, fit = false) {
   const max = Math.max(1, ...columns.map((c) => c.count.total));
   const step = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000].find((v) => max / v <= 4) || 1000;
   const top = Math.ceil(max / step) * step;
@@ -728,11 +728,11 @@ function columnChart(columns, title) {
   for (let v = 0; v <= top; v += step) lines.push(`<span class="vz-line" style="bottom:${(v / top) * 100}%"><i>${num(v)}</i></span>`);
   const cols = columns.map((c) => {
     const segs = KINDS.filter(([k]) => c.count[k]).map(([k]) => `<i class="vz-seg k-${k}" style="height:${(c.count[k] / top) * 100}%"></i>`).join('');
-    const tip = `${c.long}: ${num(c.count.total)} finished${c.count.total ? ` (${splitText(c.count)})` : ''}`;
+    const tip = `${c.long}: ${num(c.count.total)} finished${c.count.total ? ` (${splitText(c.count)})` : ''}${c.more || ''}`;
     const label = (c.on || c === peak) && c.count.total ? `<b class="vz-val" style="bottom:${(c.count.total / top) * 100}%">${num(c.count.total)}</b>` : '';
     const inner = `${label}<span class="vz-stack">${segs}</span><span class="vz-x">${esc(c.label)}</span>`;
-    return c.key
-      ? `<button type="button" class="vz-col${c.on ? ' on' : ''}" data-year="${esc(c.key)}" data-tip="${esc(tip)}" aria-pressed="${Boolean(c.on)}" aria-label="${esc(tip)}">${inner}</button>`
+    return c.attr
+      ? `<button type="button" class="vz-col${c.on ? ' on' : ''}" ${c.attr} data-tip="${esc(tip)}" aria-pressed="${Boolean(c.on)}" aria-label="${esc(tip)}">${inner}</button>`
       : `<div class="vz-col" data-tip="${esc(tip)}" tabindex="0" role="img" aria-label="${esc(tip)}">${inner}</div>`;
   }).join('');
   const used = KINDS.filter(([k]) => columns.some((c) => c.count[k]));
@@ -740,7 +740,7 @@ function columnChart(columns, title) {
     columns.map((c) => `<tr><th scope="row">${esc(c.long)}</th>${used.map(([k]) => `<td>${num(c.count[k])}</td>`).join('')}<td>${num(c.count.total)}</td></tr>`).join('')}</tbody></table></details>`;
   return `<div class="vz">
     <div class="vz-legend">${used.map(([k, l]) => `<span><i class="k-${k}"></i>${l}</span>`).join('')}</div>
-    <div class="vz-scroll"><div class="vz-plot" style="--n:${columns.length}"><div class="vz-grid">${lines.join('')}</div><div class="vz-cols">${cols}</div></div></div>
+    <div class="vz-scroll"><div class="vz-plot${fit ? ' fit' : ''}" style="--n:${columns.length}"><div class="vz-grid">${lines.join('')}</div><div class="vz-cols">${cols}</div></div></div>
     ${table}
   </div>`;
 }
@@ -751,8 +751,8 @@ function shareBar(title, parts) {
   if (!total) return '';
   const live = parts.filter(([, n]) => n);
   return `<div class="share"><h3>${title}</h3>
-    <div class="share-bar">${live.map(([label, n, k]) => `<i class="k-${k}" style="flex:${n}" data-tip="${esc(`${label}: ${num(n)} (${Math.round((n / total) * 100)}%)`)}"></i>`).join('')}</div>
-    <ul class="share-key">${live.map(([label, n, k]) => `<li><i class="k-${k}"></i>${label} <b>${num(n)}</b> <span>${Math.round((n / total) * 100)}%</span></li>`).join('')}</ul>
+    <div class="share-bar">${live.filter(([, n]) => n / total >= 0.01).map(([label, n, k]) => `<i class="k-${k}" style="flex:${n}" data-tip="${esc(`${label}: ${num(n)} (${Math.round((n / total) * 100)}%)`)}"></i>`).join('')}</div>
+    <ul class="share-key">${live.map(([label, n, k]) => `<li><i class="k-${k}"></i>${label} <b>${num(n)}</b> <span>${n / total < 0.01 ? 'under 1' : Math.round((n / total) * 100)}%</span></li>`).join('')}</ul>
   </div>`;
 }
 
@@ -779,10 +779,15 @@ function goalMeter(year, finished, goal, footer) {
   const diff = finished - expected;
   const pace = finished >= goal ? 'Goal reached.' : diff > 0 ? `${diff} ahead of pace.` : diff < 0 ? `${-diff} behind pace.` : 'Right on pace.';
   const pct = Math.min(100, Math.round((finished / goal) * 100));
+  // what it takes from here, and where the year ends if the rest goes like the start
+  const left = goal - finished, daysLeft = Math.max(1, Math.ceil((end - now) / 864e5)), part = (now - start) / (end - start);
+  const rate = (n) => (n >= 10 ? num(Math.round(n)) : String(Math.round(n * 10) / 10));
+  const needText = now >= end || now < start ? '' : daysLeft >= 14 ? `, about ${rate(left / (daysLeft / 7))} a week from here` : `, about ${rate(left / daysLeft)} a day from here`;
+  const endText = part > 0.1 && part < 1 && finished ? ` At this year’s pace the year ends on about ${num(Math.round(finished / part))}.` : '';
   return `<section class="goal"><h2>${year} reading goal</h2>
     <p class="goal-n"><b>${num(finished)}</b> of ${num(goal)} titles <span>${pct}%</span></p>
     <div class="goal-bar" role="img" aria-label="${finished} of ${goal} finished"><i style="width:${pct}%"></i>${finished < goal ? `<u style="left:${Math.round((expected / goal) * 100)}%" title="Where you would be today at an even pace"></u>` : ''}</div>
-    <p class="lede">${pace}${finished < goal ? ` ${num(goal - finished)} to go.` : ''}</p>
+    <p class="lede">${pace}${finished < goal ? ` ${num(goal - finished)} to go${needText}.${endText}` : ''}</p>
     ${footer}
   </section>`;
 }
@@ -801,61 +806,117 @@ function statsPage() {
   const inYear = byYear.get(year) || [];
   const count = tally(inYear);
 
-  // every year from the first to this one, so quiet years show as gaps rather than vanish
+  const params = route().params;
+  const month = /^(0[1-9]|1[0-2])$/.test(params.get('month') || '') ? params.get('month') : '';
+  const pick = ['book', 'comic'].includes(params.get('kind')) ? params.get('kind') : '';
+
+  // Years: the last eight stand on their own; older ones share one column until asked for.
+  // Inside that range every year is drawn, so a quiet year shows as a gap rather than vanishing.
   const first = Number(years[0] || thisYear);
+  const cut = Number(thisYear) - 7;
+  const fold = params.get('years') !== 'all' && first < cut - 1 && Number(year) >= cut;
   const yearCols = [];
-  for (let y = first; y <= Number(thisYear); y += 1) {
-    const key = String(y);
-    yearCols.push({ label: `’${key.slice(2)}`, long: key, count: tally(byYear.get(key) || []), key: byYear.has(key) ? key : '', on: key === year });
+  if (fold) {
+    yearCols.push({ label: `to ’${String(cut - 1).slice(2)}`, long: `${first} to ${cut - 1}`, count: tally(dated.filter((b) => Number(b.finished_at.slice(0, 4)) < cut)),
+      attr: 'data-statopt="years" data-val="all"', more: '. Pick it to show every year' });
   }
-  const monthCols = MONTH_SHORT.map((m, i) => ({
-    label: m, long: `${MONTHS[i]} ${year}`,
-    count: tally(inYear.filter((b) => Number(b.finished_at.slice(5, 7)) === i + 1)),
-  }));
+  for (let y = fold ? cut : first; y <= Number(thisYear); y += 1) {
+    const key = String(y);
+    yearCols.push({ label: `’${key.slice(2)}`, long: key, count: tally(byYear.get(key) || []), attr: byYear.has(key) ? `data-year="${key}"` : '', on: key === year });
+  }
+  const inMonth = (mm) => inYear.filter((b) => b.finished_at.slice(5, 7) === mm);
+  const monthCols = MONTH_SHORT.map((m, i) => {
+    const mm = String(i + 1).padStart(2, '0'), list = inMonth(mm);
+    return { label: m, long: `${MONTHS[i]} ${year}`, count: tally(list), attr: list.length ? `data-month="${mm}"` : '', on: mm === month };
+  });
 
   const withPages = inYear.filter((b) => b.pages);
   const pages = withPages.reduce((sum, b) => sum + b.pages, 0);
   const longest = withPages.slice().sort((a, b) => b.pages - a.pages)[0];
   const link = (b) => `<a class="${lc(b)}" href="#/book/${esc(b.id)}">${esc(b.title)}</a>`;
-  const shelfCount = (key) => books.filter(SHELVES.find((x) => x.key === key).test).length;   // same numbers as the shelves
   const all = tally(read);
-  const tile = (n, label, sub = '', href = '') => `<${href ? `a href="${href}"` : 'div'} class="stile"><b>${n}</b><span>${label}</span>${sub ? `<small>${sub}</small>` : ''}</${href ? 'a' : 'div'}>`;
+  const tile = (n, label, sub = '') => `<div class="stile"><b>${n}</b><span>${label}</span>${sub ? `<small>${sub}</small>` : ''}</div>`;
   const undated = read.length - dated.length;
 
-  const authors = new Map();          // a book by two authors counts once for each of them
-  read.forEach((b) => authorsOf(b.author).forEach((a) => authors.set(a, (authors.get(a) || 0) + 1)));
-  const topAuthors = [...authors.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
-  const topMax = topAuthors.length ? topAuthors[0][1] : 1;
+  // the year before, for comparison: up to today's date when looking at the current year
+  const now = new Date();
+  const prev = String(Number(year) - 1);
+  let against = '';
+  if (byYear.has(prev)) {
+    if (year === thisYear) {
+      const today = `${prev}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      against = `${num(byYear.get(prev).filter((b) => b.finished_at.slice(0, 10) <= today).length)} by this date in ${prev}`;
+    } else against = `${num(byYear.get(prev).length)} in ${prev}`;
+  }
+  // months so far (this year) or twelve (a past year), and the busiest month
+  const monthsIn = year === thisYear ? Math.max(1 / 12, (now - new Date(now.getFullYear(), 0, 1)) / (new Date(now.getFullYear() + 1, 0, 1) - new Date(now.getFullYear(), 0, 1))) * 12 : 12;
+  const perMonth = count.total / monthsIn;
+  const busiest = monthCols.reduce((best, c) => (c.count.total > best.count.total ? c : best), monthCols[0]);
+  const perYm = new Map();
+  dated.forEach((b) => { const k = b.finished_at.slice(0, 7); perYm.set(k, (perYm.get(k) || 0) + 1); });
+  const bestEver = [...perYm.entries()].sort((a, b) => b[1] - a[1])[0];
+
+  // the row of covers: one month if a month is picked, otherwise the latest of the year; the same title is shown once
+  const seen = new Set();
+  const shown = (month ? inMonth(month) : inYear).slice().sort((a, b) => String(b.finished_at).localeCompare(String(a.finished_at)))
+    .filter((b) => { const k = `${norm(b.title)}|${norm(b.author)}`; if (seen.has(k)) return false; seen.add(k); return true; });
+  const recent = shown.slice(0, month ? 60 : 14);
+  const rowTitle = month ? `Finished in ${MONTHS[Number(month) - 1]} ${year}` : `Finished in ${year}`;
+
+  // rankings: everything, or only books, or only comics
+  const pool = pick ? read.filter((b) => kindOf(b) === pick) : read;
+  const top = (map) => [...map.entries()].sort((a, b) => b[1] - a[1] || collator.compare(a[0], b[0])).slice(0, 10);
+  const bump = (map, k) => map.set(k, (map.get(k) || 0) + 1);
+  const authors = new Map(), genres = new Map(), series = new Map();   // a book by two authors counts once for each of them
+  pool.forEach((b) => {
+    authorsOf(b.author).forEach((a) => bump(authors, a));
+    (b.genres || []).forEach((g) => { if (g) bump(genres, g); });
+    if (b.series) bump(series, b.series);
+  });
+  const rank = (title, entries, href) => {
+    const max = entries.length ? entries[0][1] : 1;
+    return `<div class="rank-col"><h3>${title}</h3>${entries.length
+      ? `<ol class="rank">${entries.map(([name, n]) => `<li><a class="${/[ঀ-৿]/.test(name) ? 'bn' : ''}" href="${esc(href(name))}">${esc(name)}</a><b>${num(n)}</b><span class="rank-bar"><i style="width:${(n / max) * 100}%"></i></span></li>`).join('')}</ol>`
+      : '<p class="hint">Nothing here yet.</p>'}</div>`;
+  };
+  const seg = [['', 'Everything'], ['book', 'Books'], ['comic', 'Comics']].map(([v, label]) => `<button type="button" data-statopt="kind" data-val="${v}" aria-pressed="${v === pick}">${label}</button>`).join('');
 
   const copies = { hard: 0, ebook: 0, both: 0, none: 0 };
   read.filter((b) => b.format === 'Book').forEach((b) => {
     const c = b.copies || [];
     copies[c.includes('hardcopy') && c.includes('ebook') ? 'both' : c.includes('hardcopy') ? 'hard' : c.includes('ebook') ? 'ebook' : 'none'] += 1;
   });
-  const recent = inYear.slice().sort((a, b) => String(b.finished_at).localeCompare(String(a.finished_at))).slice(0, 14);
+  const older = first < cut - 1;
+  const undatedNote = undated ? `<p class="hint vz-note">${num(undated)} finished ${undated === 1 ? 'title has' : 'titles have'} no finish date, so ${undated === 1 ? 'it is' : 'they are'} not in these charts.${ownerHere() ? ' <a href="admin.html#missing=finished">Add the dates in the dashboard</a>' : ''}</p>` : '';
 
   return `<div class="wrap statpage">
     <h1>Stats</h1>
     ${goalCard(thisYear, (byYear.get(thisYear) || []).length)}
     <section class="stiles">
-      ${tile(num(count.total), `Finished in ${year}`, splitText(count))}
-      ${tile(num(shelfCount('reading')), 'Reading now', '', '#/shelf/reading')}
-      ${tile(num(shelfCount('want')), 'On the to-read pile', '', '#/shelf/want')}
-      ${tile(num(read.length), 'Finished, all time', `${splitText(all)}${undated ? `. ${num(undated)} have no finish date, so they are not in the charts` : ''}`)}
+      ${tile(num(count.total), `Finished in ${year}`, `${splitText(count)}${against ? `. ${against}` : ''}`)}
+      ${tile(perMonth >= 10 ? num(Math.round(perMonth)) : String(Math.round(perMonth * 10) / 10), `A month on average in ${year}`, busiest.count.total ? `Busiest: ${busiest.long.split(' ')[0]}, with ${num(busiest.count.total)}` : '')}
+      ${tile(pages ? num(pages) : '–', `Pages in ${year}`, pages ? `Across the ${num(withPages.length)} of ${num(inYear.length)} with a page count${longest ? `. Longest: ${link(longest)} (${num(longest.pages)})` : ''}` : 'None of these have a page count yet')}
+      ${tile(num(read.length), 'Finished, all time', `${splitText(all)}${bestEver ? `. Best month: ${MONTHS[Number(bestEver[0].slice(5)) - 1]} ${bestEver[0].slice(0, 4)}, with ${num(bestEver[1])}` : ''}`)}
     </section>
-    <section class="vz-card"><h2>Finished each year</h2><p class="hint">Pick a year to see its months.</p>${columnChart(yearCols, 'Year')}</section>
-    <section class="vz-card"><h2>${year}, month by month</h2>
-      ${columnChart(monthCols, 'Month')}
-      <p class="lede">${pages ? `${num(pages)} pages across the ${num(withPages.length)} of these with a page count${longest ? `. Longest: ${link(longest)} (${num(longest.pages)} pages)` : ''}.` : 'None of these have a page count yet.'}</p>
+    <section class="vz-card"><h2>Finished each year</h2><p class="hint">Pick a year to see its months.</p>${columnChart(yearCols, 'Year', fold)}
+      ${older ? `<p class="vz-more"><button type="button" data-statopt="years" data-val="${fold ? 'all' : ''}">${fold ? `Show every year since ${first}` : 'Show the last eight years only'}</button></p>` : ''}
+      ${undatedNote}
     </section>
-    ${recent.length ? `<section class="shelf-row"><div class="row-head"><h2>Finished in ${year}</h2><a href="#/shelf/read">See the Read shelf</a></div><div class="row">${recent.map(homeCard).join('')}</div></section>` : ''}
+    <section class="vz-card"><h2>${year}, month by month</h2><p class="hint">Pick a month to see what was finished in it.</p>
+      ${columnChart(monthCols, 'Month', true)}
+    </section>
+    ${recent.length ? `<section class="shelf-row" id="stat-row"><div class="row-head"><h2>${rowTitle}</h2>${month ? '<button type="button" data-month="">Show the whole year</button>' : '<a href="#/shelf/read">See the Read shelf</a>'}</div><div class="row">${recent.map(homeCard).join('')}</div>${shown.length > recent.length ? `<p class="hint">Showing the latest ${num(recent.length)} of ${num(shown.length)}.</p>` : ''}</section>` : ''}
     <section class="vz-card"><h2>Everything read so far</h2>
       ${shareBar('Kind', [['Books', all.book, 'book'], ['Comics', all.comic, 'comic'], ['Audiobooks', all.audio, 'audio']])}
       ${shareBar('Language', [['Bengali', read.filter((b) => b.language === 'Bengali').length, 's1'], ['English', read.filter((b) => b.language === 'English').length, 's2']])}
       ${shareBar('Copy of the books read', [['Hardcopy', copies.hard, 's1'], ['Ebook', copies.ebook, 's2'], ['Both', copies.both, 's3'], ['Not recorded', copies.none, 'none']])}
     </section>
-    <section class="vz-card"><h2>Most-read authors</h2>
-      <ol class="rank">${topAuthors.map(([name, n]) => `<li><a class="${/[ঀ-৿]/.test(name) ? 'bn' : ''}" href="${esc(authorHref(name))}">${esc(name)}</a><span class="rank-bar"><i style="width:${(n / topMax) * 100}%"></i></span><b>${num(n)}</b></li>`).join('')}</ol>
+    <section class="vz-card"><div class="rank-head"><h2>Most read</h2><div class="seg" role="group" aria-label="Count">${seg}</div></div>
+      <div class="rank-cols">
+        ${rank('Authors', top(authors), authorHref)}
+        ${rank('Genres', top(genres), (g) => `#/genre/${genreKey(g)}`)}
+        ${rank('Series', top(series), seriesHref)}
+      </div>
     </section>
   </div>`;
 }
@@ -1056,6 +1117,17 @@ function render() {
     const sc = on.closest('.vz-scroll');
     if (sc.scrollWidth > sc.clientWidth) sc.scrollLeft = on.offsetLeft + on.closest('.vz-plot').offsetLeft - (sc.clientWidth - on.offsetWidth) / 2;
   }
+}
+
+// Redraw the stats page after a choice, without the page or a sideways-scrolled chart jumping.
+function redrawStats(focus, keepSideways) {
+  const y = window.scrollY;
+  const sideways = [...app.querySelectorAll('.vz-scroll')].map((el) => el.scrollLeft);
+  render();
+  window.scrollTo({ top: y, behavior: 'instant' });
+  if (keepSideways) app.querySelectorAll('.vz-scroll').forEach((el, i) => { if (sideways[i] != null) el.scrollLeft = sideways[i]; });
+  const again = focus && app.querySelector(focus);
+  if (again) again.focus({ preventScroll: true });
 }
 
 // Show the saved copy of the shelf at once (if this browser has one), then fetch the current shelf
@@ -1268,7 +1340,14 @@ app.addEventListener('click', (e) => {
     return;
   }
   const yearBtn = e.target.closest('[data-year]');
-  if (yearBtn) { setOption('year', yearBtn.dataset.year); const y = window.scrollY; const sideways = [...app.querySelectorAll('.vz-scroll')].map((el) => el.scrollLeft); render(); window.scrollTo({ top: y, behavior: 'instant' }); app.querySelectorAll('.vz-scroll').forEach((el, i) => { if (i === 0 && sideways[i] != null) el.scrollLeft = sideways[i]; }); const again = app.querySelector(`[data-year="${yearBtn.dataset.year}"]`); if (again) again.focus({ preventScroll: true }); return; }
+  if (yearBtn) { setOption('year', yearBtn.dataset.year); setOption('month', ''); redrawStats(`[data-year="${yearBtn.dataset.year}"]`, true); return; }
+  const monthBtn = e.target.closest('[data-month]');
+  if (monthBtn) { const mm = route().params.get('month') === monthBtn.dataset.month ? '' : monthBtn.dataset.month; setOption('month', mm); redrawStats(mm ? `.vz-col[data-month="${mm}"]` : '.vz-col[data-month]', true); return; }
+  const optBtn = e.target.closest('[data-statopt]');
+  if (optBtn) {
+    // going back to the recent years while an older year is picked: let go of that year too
+    if (optBtn.dataset.statopt === 'years' && !optBtn.dataset.val && Number(route().params.get('year')) < new Date().getFullYear() - 7) { setOption('year', ''); setOption('month', ''); }
+    setOption(optBtn.dataset.statopt, optBtn.dataset.val); redrawStats(`[data-statopt="${optBtn.dataset.statopt}"]${optBtn.dataset.statopt === 'kind' ? `[data-val="${optBtn.dataset.val}"]` : ''}`, optBtn.dataset.statopt === 'kind'); return; }
   if (e.target.closest('[data-goal-clear]')) {
     const form = e.target.closest('[data-goal]');
     try { localStorage.removeItem(`rl-goal-${form.dataset.goal}`); } catch (err) { /* storage blocked */ }
