@@ -1,6 +1,7 @@
 // Dashboard tools: backup, duplicates, author names, series, covers.
 // Every tool shows what it found and changes nothing until you press its button.
-import { coverOf, deleteBook, updateBooks, patchBook, setCoverUrl, readSettings, saveSetting, esc, norm, authorsOf } from './api.js';
+import { coverOf, deleteBook, updateBooks, patchBook, setCoverUrl, readSettings, saveSetting, esc, norm, authorsOf, readsOf, readWhen } from './api.js';
+import { seriesListTool, onSeriesListClick, onSeriesListChange } from './series-list.js';   // Series from a list (19 November 2026)
 
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -151,6 +152,7 @@ const ICON = {
   dupes: '<rect x="2.5" y="2.5" width="8" height="8" rx="1.2"/><path d="M5.5 13.5h7a1 1 0 0 0 1-1v-7"/>',
   authors: '<circle cx="6" cy="5.5" r="2.5"/><path d="M1.8 13.5c.4-2.6 2.1-4 4.2-4s3.8 1.4 4.2 4M10.5 3.2a2.5 2.5 0 0 1 0 4.6M12 9.8c1.2.6 2 1.8 2.3 3.7"/>',
   series: '<path d="M3 2.5h2.5v11H3zM6.8 2.5h2.5v11H6.8zM10.6 4l2.4-.6 2 9.6-2.4.6z"/>',
+  list: '<path d="M5.5 4h8M5.5 8h8M5.5 12h8"/><path d="M2.5 3.3v1.4M2.2 7.3h.9l-.9 1.4h.9M2.2 11.2h.8v1.6h-.8M2.2 12h.8"/>',
   goal: '<circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2.2"/><path d="M8 8l5-5M11.5 3H13v1.5"/>',
   covers: '<rect x="2.5" y="2" width="11" height="12" rx="1.2"/><path d="M2.5 11l3-3 2.5 2.5 2-2 3.5 3.5"/><circle cx="10" cy="5.5" r="1"/>',
 };
@@ -184,6 +186,7 @@ function menu() {
     ${item('dupes', 'dupes', 'Find duplicates', `${plural(dupesNow(false).length, 'title appears', 'titles appear')} more than once.`)}
     ${item('authors', 'authors', 'Tidy author names', `${plural(authorSuggestions().length, 'author looks', 'authors look')} to be written in more than one way.`)}
     ${item('series', 'series', 'Series', hooks.hasSeries() ? `${plural(seriesFound().length, 'title carries', 'titles carry')} a series name inside the title.` : 'Needs a one-time database step. Open this to see it.')}
+    ${item('serieslist', 'list', 'Series from a list', 'Paste a series list copied from Goodreads or any site. Your books in it get the series and their numbers.')}
     ${item('covers', 'covers', 'Find covers', `${plural(books.filter(needsCover).length, 'book has', 'books have')} no cover picture.`)}
   </div>`);
 }
@@ -219,7 +222,8 @@ async function goal() {
   }
   const year = new Date().getFullYear();
   const now = Number(all[`goal-${year}`]) || 0;
-  const done = hooks.getBooks().filter((b) => b.status === 'read' && String(b.finished_at || '').startsWith(String(year))).length;
+  // const done = hooks.getBooks().filter((b) => b.status === 'read' && String(b.finished_at || '').startsWith(String(year))).length;
+  const done = hooks.getBooks().flatMap(readsOf).filter((r) => readWhen(r).startsWith(String(year))).length;   // rereads count too
   show('Reading goal', `<p>How many titles do you want to finish in ${year}? Books, comics and audiobooks all count. You have finished ${done} so far.</p>
     <div class="field"><label for="goal-n">Goal for ${year}</label><input id="goal-n" class="tl-input" type="number" min="1" max="5000" inputmode="numeric" value="${now || ''}" placeholder="e.g. 80"></div>
     <p class="hint">The goal shows on the Stats page on every device.</p>`,
@@ -550,7 +554,8 @@ async function onCover(btn) {
 // Wiring
 // ====================================================================
 let changed = false;                  // a cover was saved: refresh the list when the dialog closes
-const TOOLS = { menu, goal, backup, dupes, authors, series, covers };
+// const TOOLS = { menu, goal, backup, dupes, authors, series, covers };
+const TOOLS = { menu, goal, backup, dupes, authors, series, covers, serieslist: () => seriesListTool({ show, hooks }) };
 // Open one tool directly (the Stats page's "Change the goal" link uses this).
 export function openTool(name) { if (!TOOLS[name]) return; stop = false; dlg().showModal(); TOOLS[name](); }
 
@@ -562,6 +567,7 @@ export function initTools(h) {
   dlg().addEventListener('click', (e) => {
     const t = (sel) => e.target.closest(sel);
     if (t('[data-tool]')) { stop = true; TOOLS[t('[data-tool]').dataset.tool](); return; }
+    if (onSeriesListClick(e.target)) return;
     if (t('[data-dupe]')) { onDupe(t('[data-dupe]')); return; }
     if (t('[data-author]')) { onAuthor(t('[data-author]')); return; }
     if (t('[data-series]')) { applySeries(t('[data-series]')); return; }
@@ -570,6 +576,7 @@ export function initTools(h) {
   });
   dlg().addEventListener('change', (e) => {
     const box = e.target;
+    if (onSeriesListChange(box)) return;
     if (box.name && box.name.startsWith('keep-')) keepChoice.set(box.closest('.tl-group').dataset.key, box.value);
     if (box.dataset.merge !== undefined) { if (box.checked) mergePick.add(box.dataset.merge); else mergePick.delete(box.dataset.merge); authorList(); }
     if (box.dataset.seriesComic !== undefined) { seriesComics.set(box.dataset.seriesComic, box.checked); return; }

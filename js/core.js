@@ -161,3 +161,36 @@ export function writeShelfCache(rows) {
   try { localStorage.setItem(CACHE_KEY, JSON.stringify({ url: BASE, rows })); }
   catch (e) { try { localStorage.removeItem(CACHE_KEY); } catch (e2) { /* storage blocked or full: ignore */ } }
 }
+
+// ---------- reads, rereads and progress (added 18 November 2026) ----------
+// A book's reads live in "reads", oldest first. Each read is { d: '2024-03-14' } (a full date),
+// { y: 2019 } (only the year is known) or {} (no date at all).
+// Books saved before "reads" existed have an empty list: a Read book then counts as one read,
+// on its "finished_at" date, exactly as before.
+const readKey = (r) => (r && r.d ? String(r.d) : r && r.y ? String(r.y) : '');
+export function readsOf(b) {
+  const list = Array.isArray(b && b.reads) ? b.reads.filter((r) => r && typeof r === 'object') : [];
+  if (!list.length) return b && b.status === 'read' ? [b.finished_at ? { d: String(b.finished_at).slice(0, 10) } : {}] : [];
+  return list.slice().sort((a, c) => readKey(a).localeCompare(readKey(c)));   // undated first, then by date
+}
+// When a read happened, as text: '2024-03-14', '2019' or '' (no date).
+export const readWhen = readKey;
+// The latest full date among the reads (this is what "finished_at" holds), or null.
+export function lastReadDate(reads) {
+  const dated = reads.map((r) => (r && r.d ? String(r.d).slice(0, 10) : '')).filter(Boolean).sort();
+  return dated.length ? dated[dated.length - 1] : null;
+}
+// "4h 2m", "1h", "31m" or "52" (minutes) -> minutes; 0 when it cannot be read.
+export function toMinutes(text) {
+  const t = String(text || '').trim().toLowerCase();
+  if (/^\d+$/.test(t)) return Number(t);
+  const m = t.match(/^(?:(\d+)\s*h)?\s*(?:(\d+)\s*m(?:in)?)?$/);
+  return m && (m[1] || m[2]) ? Number(m[1] || 0) * 60 + Number(m[2] || 0) : 0;
+}
+// 1 -> '1st', 2 -> '2nd', 11 -> '11th', 23 -> '23rd'
+export function ordinal(n) {
+  const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+  return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
+}
+// Is this title being read (or reread) right now?
+export const readingNow = (b) => b.status === 'reading' || (b.status === 'read' && !!b.rereading);

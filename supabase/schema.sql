@@ -126,3 +126,13 @@ create policy "Anyone can read settings" on public.settings for select using (tr
 create policy "Owner can change settings" on public.settings for all using (public.is_owner()) with check (public.is_owner());
 grant select on public.settings to anon, authenticated;
 grant insert, update, delete on public.settings to authenticated;
+
+-- ---------------------------------------------------------------------
+-- Reads, rereads and progress (added 18 November 2026; also in supabase/reads-progress.sql)
+-- ---------------------------------------------------------------------
+alter table public.books add column if not exists reads jsonb not null default '[]'::jsonb;
+alter table public.books add column if not exists rereading boolean not null default false;
+alter table public.books add column if not exists progress numeric check (progress is null or (progress >= 0 and progress <= 100));
+alter table public.books add column if not exists progress_mark text;
+alter table public.books add column if not exists progress_on date;
+alter table public.books add column if not exists started_at date;

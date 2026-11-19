@@ -2,9 +2,11 @@
 import {
   configured, fetchBooks, coverOf, ytId, ytThumb, saveBook, deleteBook, uploadCover, removeCover,
   updateBooks, signIn, signOut, getSession, onAuth, esc, norm, initTheme, STATUS, OWN,
+  readsOf, readWhen, lastReadDate, toMinutes, ordinal, readingNow,
 } from './api.js';
 import { initImport } from './import.js';
 import { initTools, openTool } from './tools.js';
+import { initGoodreadsPage, gpReset, gpExtra, gpAfterSave } from './goodreads-page.js';   // Fill from a saved Goodreads page (19 November 2026)
 
 const $ = (id) => document.getElementById(id);
 
@@ -23,7 +25,12 @@ const ICON = {
   ebook: svg('<rect x="3.5" y="1.8" width="9" height="12.4" rx="1.6"/><path d="M7 12h2"/>'),
   bag: svg('<path d="M3 5.5h10l-.8 8H3.8z"/><path d="M5.5 5.5v-1a2.5 2.5 0 0 1 5 0v1"/>'),
 };
-const statusBadge = (b) => `<span class="badge st-${esc(b.status)}">${{ reading: ICON.book, read: ICON.done, want: ICON.bookmark }[b.status] || ''}${esc(STATUS[b.status])}</span>`;
+// const statusBadge = (b) => `<span class="badge st-${esc(b.status)}">${{ reading: ICON.book, read: ICON.done, want: ICON.bookmark }[b.status] || ''}${esc(STATUS[b.status])}</span>`;
+// A reread shows as "Rereading" in the Currently Reading colour, like the public site (18 November 2026).
+const statusBadge = (b) => {
+  const re = b.status === 'read' && b.rereading, st = re ? 'reading' : b.status;
+  return `<span class="badge st-${esc(st)}">${{ reading: ICON.book, read: ICON.done, want: ICON.bookmark }[st] || ''}${esc(re ? (b.format === 'Audiobook' ? 'Relistening' : 'Rereading') : STATUS[b.status])}</span>`;
+};
 const badge = (b) => `<span class="badge ${b.ownership === 'owned' ? 'owned' : 'buy'}">${b.ownership === 'owned' ? ICON.check : ICON.bag}${esc(OWN[b.ownership])}</span>`;
 initTheme($('theme'));
 
@@ -144,7 +151,9 @@ const hasArc = () => books.length > 0 && 'arc' in books[0];
 // [full label, short label for small phones, test, status filter, format filter]
 const STATS = [
   ['Total Books', 'Total', () => true, '', ''],
-  ['Currently Reading', 'Reading', (b) => b.format === 'Book' && b.status === 'reading', 'reading', 'Book'],
+  // ['Currently Reading', 'Reading', (b) => b.format === 'Book' && b.status === 'reading', 'reading', 'Book'],
+  // Rereads count as Currently Reading too, exactly like the public site (18 November 2026).
+  ['Currently Reading', 'Reading', (b) => b.format === 'Book' && readingNow(b), 'reading', 'Book'],
   ['Read', 'Read', (b) => b.format === 'Book' && b.status === 'read', 'read', 'Book'],
   ['Want to Read', 'To read', (b) => b.format === 'Book' && b.status === 'want', 'want', 'Book'],
   ['Audiobooks', 'Audio', (b) => b.format === 'Audiobook', '', 'Audiobook'],
@@ -193,7 +202,8 @@ const MISSING = {
   cover: noCover,
   author: (b) => /^unknown$/i.test(String(b.author || '').trim()),
   genre: (b) => !(b.genres || []).length,
-  finished: (b) => b.status === 'read' && !b.finished_at,
+  // finished: (b) => b.status === 'read' && !b.finished_at,
+  finished: (b) => b.status === 'read' && !b.finished_at && !readsOf(b).some((r) => readWhen(r)),   // a known year counts as a date
   year: (b) => !b.pub_year,
   pages: (b) => b.format === 'Book' && !b.pages,
   series: (b) => !b.series,
@@ -207,7 +217,8 @@ function matching() {
   const q = norm($('s').value);
   const st = $('sf').value, fmt = $('ff').value, lang = $('fl').value, miss = MISSING[$('fm').value];
   const list = books.filter((b) =>
-    (!st || (st === 'nocover' ? noCover(b) : b.status === st)) &&
+    // (!st || (st === 'nocover' ? noCover(b) : b.status === st)) &&
+    (!st || (st === 'nocover' ? noCover(b) : st === 'reading' ? readingNow(b) : b.status === st)) &&   // "Reading" includes rereads
     (!fmt || (fmt === 'Book' ? b.format === 'Book' : fmt === 'Plain' ? kindOf(b) === 'Book' : kindOf(b) === fmt)) && (!lang || b.language === lang) && (!miss || miss(b)) &&
     (!q || norm(b.title).includes(q) || norm(b.author).includes(q) || norm(b.series).includes(q) || norm(b.arc).includes(q)));
   const order = ORDER[$('fo').value];
@@ -220,8 +231,18 @@ const picked_ids = new Set();
 // The reading status is a small menu right in the list: change it without opening the form.
 // (Phones get shorter words, so the menu fits beside the title.)
 const SHORT_STATUS = { want: 'To read', reading: 'Reading', read: 'Read' };
-const quickStatus = (b, short = false) => `<select class="qs st-${esc(b.status)}" data-qs="${esc(b.id)}" aria-label="Reading status of ${esc(b.title)}">${
-  Object.entries(STATUS).map(([k, label]) => `<option value="${k}"${k === b.status ? ' selected' : ''}>${short ? SHORT_STATUS[k] : label}</option>`).join('')}</select>`;
+// const quickStatus = (b, short = false) => `<select class="qs st-${esc(b.status)}" data-qs="${esc(b.id)}" aria-label="Reading status of ${esc(b.title)}">${
+//   Object.entries(STATUS).map(([k, label]) => `<option value="${k}"${k === b.status ? ' selected' : ''}>${short ? SHORT_STATUS[k] : label}</option>`).join('')}</select>`;
+// A Read title also offers "Rereading" (Relistening for an audiobook); a reread shows it, in the Currently
+// Reading colour, like the badge on the book page (18 November 2026).
+const qsValue = (b) => (b.status === 'read' && b.rereading ? 'reread' : b.status);
+const quickStatus = (b, short = false) => {
+  const cur = qsValue(b);
+  const opts = Object.entries(STATUS).map(([k, label]) => [k, short ? SHORT_STATUS[k] : label]);
+  if (b.status === 'read') opts.push(['reread', b.format === 'Audiobook' ? 'Relistening' : 'Rereading']);
+  return `<select class="qs st-${esc(cur === 'reread' ? 'reading' : cur)}" data-qs="${esc(b.id)}" aria-label="Reading status of ${esc(b.title)}">${
+    opts.map(([k, label]) => `<option value="${k}"${k === cur ? ' selected' : ''}>${label}</option>`).join('')}</select>`;
+};
 
 // The small line under a title: the series (only when the title does not already say it) and the story arc.
 function subLine(b) {
@@ -359,16 +380,38 @@ async function onQuickStatus(e) {
   const sel = e.target.closest('[data-qs]');
   if (!sel) return;
   const book = books.find((b) => String(b.id) === sel.dataset.qs);
-  if (!book || sel.value === book.status) return;
-  const patch = { status: sel.value };
-  if (sel.value === 'read' && !book.finished_at) patch.finished_at = today();     // finished today, unless a date is already there
+  // if (!book || sel.value === book.status) return;
+  // const patch = { status: sel.value };
+  if (!book) return;
+  const cur = qsValue(book), v = sel.value;
+  if (v === cur) return;
+  if (v === 'reread' && !('reads' in book)) { sel.value = cur; toast('Run the database update (supabase/reads-progress.sql) first.', true); return; }
+  const patch = { status: v === 'reread' ? 'read' : v };
+  if (v === 'read' && !book.finished_at) patch.finished_at = today();     // finished today, unless a date is already there
+  // Reads and rereads (added 18 November 2026).
+  if ('reads' in book) {
+    if (v === 'reread') {
+      // start a reread: the earlier reads stay; write them out if only the old finish date was holding them
+      if (!(Array.isArray(book.reads) && book.reads.length)) patch.reads = readsOf(book);
+      Object.assign(patch, { rereading: true, started_at: today(), progress: null, progress_mark: null, progress_on: null });
+    } else {
+      // A title with recorded reads gets one more, today. Finishing a reread always counts as one more read.
+      const prior = cur === 'reread' ? readsOf(book) : (Array.isArray(book.reads) ? book.reads : []);
+      if (v === 'read' && prior.length) { patch.reads = [...prior, { d: today() }]; patch.finished_at = today(); }
+      if (book.rereading) Object.assign(patch, { rereading: false, started_at: null });
+      if (book.progress != null || book.progress_mark) Object.assign(patch, { progress: null, progress_mark: null, progress_on: null });
+    }
+  }
   sel.disabled = true;
   try {
     const row = await saveBook(patch, book.id);
     Object.assign(book, row || patch);
-    toast(`“${book.title}” is now ${STATUS[book.status]}${patch.finished_at ? ' (finished today)' : ''}`);
+    // toast(`“${book.title}” is now ${STATUS[book.status]}${patch.finished_at ? ' (finished today)' : ''}`);
+    const word = v === 'reread' ? (book.format === 'Audiobook' ? 'Relistening' : 'Rereading') : STATUS[book.status];
+    const times = patch.reads && v === 'read' ? `, read ${patch.reads.length} times` : '';
+    toast(`“${book.title}” is now ${word}${patch.finished_at ? ` (finished today${times})` : ''}`);
     renderAll();
-  } catch (err) { sel.value = book.status; sel.disabled = false; handleErr(err); }
+  } catch (err) { sel.value = cur; sel.disabled = false; handleErr(err); }
 }
 $('rows').addEventListener('change', onQuickStatus);
 $('cards').addEventListener('change', onQuickStatus);
@@ -526,7 +569,87 @@ $('f-genre-new').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e
 const dlg = $('panel');
 const FIELDS = ['title', 'author', 'year', 'language', 'format', 'pages', 'duration', 'status', 'ownership', 'youtube', 'description'];
 
-function syncStatus() { $('g-finished').hidden = $('f-status').value !== 'read'; }
+// function syncStatus() { $('g-finished').hidden = $('f-status').value !== 'read'; }
+// ----- reads, rereads and progress (added 18 November 2026) -----
+let formReads = [];          // [{ d: '2024-03-14' } | { y: 2019 } | {}], as shown in the form
+let formRereading = false;
+const newColumns = () => books.length > 0 && 'reads' in books[0];   // false until the SQL update has been run
+function renderReads() {
+  $('read-rows').innerHTML = formReads.map((r, i) => `<li>
+      <span class="rn">${ordinal(i + 1)}</span>
+      <input type="date" data-rd="${i}" value="${esc(r.d || '')}" aria-label="Date of read ${i + 1}">
+      <span class="or">or year</span>
+      <input type="text" data-ry="${i}" value="${esc(r.y || '')}" inputmode="numeric" maxlength="4" placeholder="Year" aria-label="Year of read ${i + 1}">
+      <button type="button" class="btn icon-x" data-rx="${i}" aria-label="Remove read ${i + 1}">\u00d7</button>
+    </li>`).join('') || '<li class="none">No reads recorded.</li>';
+}
+function syncStatus() {
+  const st = $('f-status').value;
+  if (st !== 'read') formRereading = false;
+  const active = st === 'reading' || formRereading;
+  const audio = $('f-format').value === 'Audiobook';
+  $('g-progress').hidden = !active;
+  $('g-page').hidden = audio;
+  $('g-time').hidden = !audio;
+  $('prog-hint').textContent = !newColumns() && books.length
+    ? 'Progress and reads are saved once the database update (supabase/reads-progress.sql) has been run.'
+    : audio ? 'Type a percent, or the time heard so far (like 52m): the percent is worked out from the duration.'
+      : 'Type the percent your ebook reader shows, or a page number: the percent is worked out from the page count.';
+  $('reread-start').hidden = !(st === 'read' && !formRereading);
+  $('reread-start').textContent = audio ? 'Start a relisten' : 'Start a reread';
+  $('read-finish').hidden = !active;
+  $('read-finish').textContent = audio ? 'Finished this listen' : 'Finished this read';
+  $('reread-stop').hidden = !formRereading;
+  $('reread-stop').textContent = audio ? 'Stop relistening' : 'Stop rereading';
+}
+const clearProgress = () => { $('f-pct').value = ''; $('f-page').value = ''; $('f-time').value = ''; $('f-started').value = ''; };
+$('read-rows').addEventListener('input', (e) => {
+  const d = e.target.closest('[data-rd]'), y = e.target.closest('[data-ry]');
+  if (d) { const i = Number(d.dataset.rd); formReads[i] = d.value ? { d: d.value } : {}; const yi = $('read-rows').querySelector(`[data-ry="${i}"]`); if (yi && d.value) yi.value = ''; }
+  if (y) { const i = Number(y.dataset.ry); const v = y.value.trim(); formReads[i] = /^\d{4}$/.test(v) ? { y: Number(v) } : {}; const di = $('read-rows').querySelector(`[data-rd="${i}"]`); if (di && v) di.value = ''; }
+});
+$('read-rows').addEventListener('click', (e) => {
+  const x = e.target.closest('[data-rx]');
+  if (x) { formReads.splice(Number(x.dataset.rx), 1); renderReads(); }
+});
+$('read-add').addEventListener('click', () => {
+  formReads.unshift({});                 // a past read is usually older than the ones already listed
+  renderReads();
+  const first = $('read-rows').querySelector('[data-rd="0"]');
+  if (first) first.focus();
+});
+$('reread-start').addEventListener('click', () => {
+  formRereading = true;
+  clearProgress();
+  $('f-started').value = today();
+  syncStatus();
+  $('f-pct').focus();
+});
+$('read-finish').addEventListener('click', () => {
+  formReads.push({ d: today() });
+  formRereading = false;
+  $('f-status').value = 'read';
+  clearProgress();
+  renderReads(); syncStatus();
+  toast('Added a read for today. Press Save to keep it.');
+});
+$('reread-stop').addEventListener('click', () => { formRereading = false; clearProgress(); syncStatus(); });
+// a page number or the time heard fills in the percent
+$('f-page').addEventListener('input', () => {
+  const page = Number($('f-page').value), pages = Number($('f-pages').value);
+  if (page > 0 && pages > 0) $('f-pct').value = String(Math.min(100, Math.round((page / pages) * 100)));
+});
+$('f-time').addEventListener('input', () => {
+  const heard = toMinutes($('f-time').value), total = toMinutes($('f-duration').value);
+  if (heard > 0 && total > 0) $('f-pct').value = String(Math.min(100, Math.round((heard / total) * 100)));
+});
+$('f-pct').addEventListener('input', () => { $('f-page').value = ''; $('f-time').value = ''; });   // a typed percent stands alone
+// Marking a title Read by hand adds a read for today, unless reads are already listed.
+let lastStatus = '';
+$('f-status').addEventListener('change', () => {
+  if ($('f-status').value === 'read' && lastStatus !== 'read' && !formReads.length) { formReads.push({ d: today() }); renderReads(); }
+  lastStatus = $('f-status').value;
+});
 // "4", "4.5" or Bengali digits ("৪") -> a number, or null when empty / not a number.
 const BN_DIGITS = '\u09e6\u09e7\u09e8\u09e9\u09ea\u09eb\u09ec\u09ed\u09ee\u09ef';
 function seriesNumber(text) {
@@ -553,6 +676,7 @@ function updateYtPreview() {
 }
 $('f-youtube').addEventListener('input', updateYtPreview);
 $('f-format').addEventListener('change', syncFormat);
+$('f-format').addEventListener('change', () => syncStatus());   // page or time heard (added 18 November 2026)
 
 function setPreview(src) {
   if (previewUrl.startsWith('blob:')) URL.revokeObjectURL(previewUrl);
@@ -569,6 +693,7 @@ function setPreview(src) {
 function openPanel(book) {
   editing = book || null;
   newBlob = null; removeFlag = false;
+  gpReset();
   FIELDS.forEach((f) => setErr(f, ''));
   setErr('cover', '');
   $('panel-title').textContent = book ? 'Edit Book' : 'Add Book';
@@ -582,7 +707,16 @@ function openPanel(book) {
   $('f-duration').value = b.duration || '';
   $('f-status').value = b.status;
   $('f-ownership').value = b.ownership;
-  $('f-finished').value = b.finished_at || '';
+  // $('f-finished').value = b.finished_at || '';
+  formReads = readsOf(b).map((r) => (r.d ? { d: String(r.d).slice(0, 10) } : r.y ? { y: Number(r.y) } : {}));
+  formRereading = b.status === 'read' && !!b.rereading;
+  lastStatus = b.status;
+  $('f-pct').value = b.progress ?? '';
+  $('f-page').value = b.format !== 'Audiobook' && /^\d+$/.test(String(b.progress_mark || '')) ? b.progress_mark : '';
+  $('f-time').value = b.format === 'Audiobook' ? (b.progress_mark || '') : '';
+  $('f-started').value = b.started_at || '';
+  setErr('progress', ''); setErr('reads', '');
+  renderReads();
   $('g-series').hidden = $('g-series-no').hidden = !hasSeries();
   $('f-series').value = b.series || '';
   $('f-series-no').value = b.series_no ?? '';
@@ -742,11 +876,42 @@ function validate() {
   if (!audio && pages && !/^[1-9]\d*$/.test(pages)) bad('pages', 'Pages must be a whole number above 0.');
   if ($('f-series-no').value.trim() && seriesNumber($('f-series-no').value) === null) bad('series-no', 'Enter a number, like 4.');
   if ($('f-arc-no').value.trim() && seriesNumber($('f-arc-no').value) === null) bad('arc-no', 'Enter a number, like 1.');
+  // progress and reads (added 18 November 2026)
+  const pctText = $('f-pct').value.trim();
+  if (!$('g-progress').hidden && pctText && !(/^\d+(\.\d+)?$/.test(pctText) && Number(pctText) <= 100)) bad('progress', 'The percent must be a number from 0 to 100.');
+  if (!$('g-progress').hidden && audio && $('f-time').value.trim() && !toMinutes($('f-time').value)) bad('progress', 'Write the time heard like 52m or 1h 5m.');
+  if ($('read-rows').querySelectorAll('[data-ry]').length && [...$('read-rows').querySelectorAll('[data-ry]')].some((el) => el.value.trim() && !/^(19|20)\d{2}$/.test(el.value.trim()))) bad('reads', 'A year needs four digits, like 2019.');
   const yt = $('f-youtube').value.trim();
   if (audio && yt) {
     if (!ytId(yt)) bad('youtube', 'Paste a YouTube video link, like https://www.youtube.com/watch?v=\u2026 or https://youtu.be/\u2026');
   }
   return ok;
+}
+
+// The reads and progress part of a save. "finished_at" keeps the latest full date, so everything that
+// already uses it (the carousel, sorting, the dashboard filters) keeps working.
+function readFields(audio) {
+  const status = $('f-status').value;
+  const reads = formReads.map((r) => (r.d ? { d: r.d } : r.y ? { y: r.y } : {}))
+    .sort((a, c) => readWhen(a).localeCompare(readWhen(c)));
+  if (status === 'read' && !reads.length) reads.push({});          // read once, date unknown
+  const finished_at = status === 'read' ? lastReadDate(reads) : null;
+  if (!newColumns() && books.length) return { finished_at };       // database not updated yet: keep the finish date only
+  const active = status === 'reading' || (status === 'read' && formRereading);
+  const pctText = $('f-pct').value.trim();
+  const progress = active && pctText !== '' ? Math.round(Number(pctText) * 10) / 10 : null;
+  const mark = active ? (audio ? $('f-time').value.trim() : $('f-page').value.trim()) || null : null;
+  const before = editing || {};
+  const changed = progress !== (before.progress ?? null) || mark !== (before.progress_mark ?? null);
+  return {
+    finished_at,
+    reads,
+    rereading: status === 'read' && formRereading,
+    progress,
+    progress_mark: mark,
+    progress_on: progress == null && !mark ? null : changed ? today() : (before.progress_on || today()),
+    started_at: active ? $('f-started').value || null : null,
+  };
 }
 
 function collect() {
@@ -766,7 +931,9 @@ function collect() {
     genres: picked.slice(),
     youtube_url: audio && val('youtube') ? val('youtube') : null,
     description: val('description') || null,
-    finished_at: $('f-status').value === 'read' && $('f-finished').value ? $('f-finished').value : null,
+    // finished_at: $('f-status').value === 'read' && $('f-finished').value ? $('f-finished').value : null,
+    ...readFields(audio),
+    ...gpExtra(),                                   // e.g. the ISBN from a saved Goodreads page
     ...(hasSeries() ? { series: val('series') || null, series_no: val('series') ? seriesNumber(val('series-no')) : null } : {}),
     ...(hasArc() ? { arc: val('arc') || null, arc_no: val('arc') ? seriesNumber(val('arc-no')) : null } : {}),
   };
@@ -801,8 +968,10 @@ $('book-form').addEventListener('submit', async (e) => {
     if (newBlob) { uploaded = await uploadCover(newBlob); data.cover_path = uploaded; }
     else if (removeFlag) { data.cover_path = null; data.cover_url = null; }
     else data.cover_path = oldPath;
+    // await saveBook(data, editing ? editing.id : null);
     await saveBook(data, editing ? editing.id : null);
     if (oldPath && (uploaded || removeFlag)) await removeCover(oldPath); // tidy the replaced file
+    try { await gpAfterSave(); } catch (err2) { handleErr(err2); }       // books inside this one join its story arc
     if (goBackToBook()) return;            // came from the public site's Edit button: back to that book
     dlg.close();
     toast('Book saved');
@@ -815,6 +984,18 @@ $('book-form').addEventListener('submit', async (e) => {
 
 initImport({ getBooks: () => books, refresh, toast, statusBadge, badge });
 initTools({ getBooks: () => books, refresh, toast, handleErr, hasSeries, hasArc, seriesNumber });
+initGoodreadsPage({
+  getBooks: () => books, getEditing: () => editing, handleFile, toast, openPanel, hasSeries, hasArc,
+  coverShown: () => !$('preview').hidden,
+  getGenres: () => picked.slice(),
+  knownGenre: (g) => [...GENRES, ...books.flatMap((b) => b.genres || [])].find((k) => k.toLowerCase().replace(/s$/, '') === g.toLowerCase().replace(/s$/, '')) || g,
+  addGenres: (list) => {             // a name the site already uses (any capitals, singular or plural) is reused
+    const known = [...GENRES, ...books.flatMap((b) => b.genres || [])];
+    const key = (g) => g.toLowerCase().replace(/s$/, '');
+    list.forEach((g) => { const use = known.find((k) => key(k) === key(g)) || g; if (!picked.some((p) => key(p) === key(use))) picked.push(use); });
+    renderGenres();
+  },
+});
 
 // ---------- start ----------
 (async function boot() {

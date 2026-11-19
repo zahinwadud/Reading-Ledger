@@ -6,6 +6,7 @@ import * as CONFIG from './config.js';   // read by name, so an older config.js 
 // The helpers both pages share live in core.js (the public site loads only that file, not this one).
 import { configured } from './core.js';
 export { configured, STATUS, OWN, esc, norm, authorsOf, ytId, ytThumb, initTheme, coverUrl, coverOf } from './core.js';
+export { readsOf, readWhen, lastReadDate, toMinutes, ordinal, readingNow } from './core.js';   // added 18 November 2026
 
 const sb = configured ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 const BUCKET = 'covers';

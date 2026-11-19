@@ -1,5 +1,5 @@
 // Public site: home rows, shelf pages, book detail, live search.
-import { configured, fetchShelf, fetchSettings, readShelfCache, writeShelfCache, coverOf, ytThumb, ytId, esc, norm, authorsOf, initTheme, STATUS, OWN } from './core.js';
+import { configured, fetchShelf, fetchSettings, readShelfCache, writeShelfCache, coverOf, ytThumb, ytId, esc, norm, authorsOf, initTheme, STATUS, OWN, readsOf, readWhen, ordinal, readingNow } from './core.js';
 
 const app = document.getElementById('app');
 const qEl = document.getElementById('q');
@@ -97,6 +97,11 @@ function sortSelect(options) {
 }
 const SORT_DEFAULT = ['added', 'title', 'author', 'newest', 'oldest'];
 const SORT_READ = ['finished', 'added', 'title', 'author', 'newest', 'oldest'];
+// Currently Reading (added 18 November 2026): latest activity first, the same order as its row on the home page.
+// Activity = the day progress was last updated, or else the day the read started; titles with neither follow, newest added first.
+const activityOf = (b) => String(b.progress_on || b.started_at || '');
+SORTS.updated = ['Recently updated', (a, b) => activityOf(b).localeCompare(activityOf(a)) || byAdded(a, b)];
+const SORT_READING = ['updated', 'added', 'title', 'author', 'newest', 'oldest'];
 const SORT_AUTHOR = ['title', 'newest', 'oldest', 'added'];
 SORTS.series = ['Series order', (a, b) => (a.series_no ?? Infinity) - (b.series_no ?? Infinity) || byTitle(a, b)];
 const SORT_SERIES = ['series', 'title', 'newest', 'oldest'];
@@ -122,7 +127,9 @@ const wroteIt = (b, key) => authorsOf(b.author).some((a) => norm(a) === key);
 // ---------- shelves ----------
 // Reading-status shelves hold Books. Audiobooks have their own shelf. "All" shows everything.
 const SHELVES = [
-  { key: 'reading', label: 'Currently Reading', test: (b) => b.format === 'Book' && b.status === 'reading' },
+  // { key: 'reading', label: 'Currently Reading', test: (b) => b.format === 'Book' && b.status === 'reading' },
+  // A book being reread stays on Read (it has been read) and is also on Currently Reading.
+  { key: 'reading', label: 'Currently Reading', test: (b) => b.format === 'Book' && readingNow(b) },
   { key: 'read', label: 'Read', test: (b) => b.format === 'Book' && b.status === 'read' },
   { key: 'want', label: 'Want to Read', test: (b) => b.format === 'Book' && b.status === 'want' },
   { key: 'audio', label: 'Audiobooks', test: (b) => b.format === 'Audiobook' },
@@ -187,9 +194,15 @@ function coverHtml(b, eager) {
 // Reading status pill: Currently Reading / Read / Want to Read.
 const STATUS_ICON = { reading: ICON.book, read: ICON.done, want: ICON.bookmark };
 const HEARD = { want: 'Want to Listen', reading: 'Listening', read: 'Listened' };
-const statusWord = (b) => (b.format === 'Audiobook' ? HEARD[b.status] : STATUS[b.status]) || '';
+// const statusWord = (b) => (b.format === 'Audiobook' ? HEARD[b.status] : STATUS[b.status]) || '';
+// A reread shows as "Rereading" ("Relistening" for an audiobook), with the same look as Currently Reading.
+const rereadingNow = (b) => b.status === 'read' && !!b.rereading;
+const statusWord = (b) => (rereadingNow(b) ? (b.format === 'Audiobook' ? 'Relistening' : 'Rereading')
+  : (b.format === 'Audiobook' ? HEARD[b.status] : STATUS[b.status])) || '';
 function statusBadge(b) {
-  return `<span class="badge st-${esc(b.status)}">${STATUS_ICON[b.status] || ''}${esc(statusWord(b))}</span>`;
+  // return `<span class="badge st-${esc(b.status)}">${STATUS_ICON[b.status] || ''}${esc(statusWord(b))}</span>`;
+  const st = rereadingNow(b) ? 'reading' : b.status;
+  return `<span class="badge st-${esc(st)}">${STATUS_ICON[st] || ''}${esc(statusWord(b))}</span>`;
 }
 
 // Which copies I have of a book: Hardcopy, Ebook or both. Shown on the book page only.
@@ -206,9 +219,9 @@ function badge(b) {
 
 // Cards show cover, title and author only. The reading-status and ownership tags live on the book's
 // detail page (and in the dashboard). Pass withTags = true to bring them back on cards.
-function cardBase(b, withTags, extra = '', cls = '') {
+function cardBase(b, withTags, extra = '', cls = '', underCover = '') {
   return `<a class="card${b.format === 'Audiobook' ? ' wide' : ''}${cls}" href="#/book/${esc(b.id)}">
-    ${coverHtml(b)}
+    ${coverHtml(b)}${underCover}
     ${withTags ? `<p class="cstat">${statusBadge(b)}</p>` : ''}
     <h3 class="ct ${lc(b)}">${esc(b.title)}</h3>
     <p class="ca ${lc(b)}">${esc(b.author)}</p>
@@ -217,6 +230,12 @@ function cardBase(b, withTags, extra = '', cls = '') {
 }
 const card = (b) => cardBase(b, false);
 const homeCard = (b) => cardBase(b, false);
+// Currently Reading on the home page: a slim progress bar under the cover, once progress is recorded.
+const progressCard = (b) => {
+  const pct = pctOf(b);
+  return pct == null ? homeCard(b)
+    : cardBase(b, false, '', ' hasprog', `<span class="cprog">${pctBar(pct)}<small>${pct}%</small></span>`);
+};
 
 // Outside the Comics page, a comic series with several issues in one list is shown once, as a stack
 // that opens the series; otherwise ten issues of one comic push everything else off the screen.
@@ -460,6 +479,12 @@ function homePage() {
         return new Date(b.created_at || 0) - new Date(a.created_at || 0);
       });
     }
+    // --- CURRENTLY READING: latest activity first (progress updated, or the read started) ---
+    else if (s.key === 'reading') {
+      // const act = (b) => String(b.progress_on || b.started_at || '');
+      // all.sort((a, b) => act(b).localeCompare(act(a)));       // the rest keep their order
+      all.sort(SORTS.updated[1]);                               // the same order as the shelf page's default
+    }
     // --- FOR AUDIOBOOKS BLOCK ---
     else if (s.key === 'audio') {
       all.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
@@ -469,7 +494,7 @@ function homePage() {
     const list = (s.key === 'audio' ? all : stackSeries(all)).slice(0, HOME_ROW_LIMIT);
     return `<section class="shelf-row${s.key === 'reading' ? ' home-now' : ''}" aria-label="${esc(s.label)}">
       <div class="row-head"><h2><span class="hi">${HOME_ICON[s.key]}</span>${s.label}<small>${num(all.length)}</small></h2><a href="#/shelf/${s.key}" aria-label="See all ${num(all.length)} in ${esc(s.label)}">See all${ICON.right}</a></div>
-      ${list.length ? `<div class="row fit${s.key === 'audio' ? ' wide' : ''}">${list.map(orStack(homeCard)).join('')}${all.length > list.length ? `<a class="card endcard" href="#/shelf/${s.key}"><b>${num(all.length)}</b><span>See all</span>${ICON.right}</a>` : ''}</div>` : '<p class="empty">Nothing on this shelf yet.</p>'}
+      ${list.length ? `<div class="row fit${s.key === 'audio' ? ' wide' : ''}">${list.map(orStack(s.key === 'reading' ? progressCard : homeCard)).join('')}${all.length > list.length ? `<a class="card endcard" href="#/shelf/${s.key}"><b>${num(all.length)}</b><span>See all</span>${ICON.right}</a>` : ''}</div>` : '<p class="empty">Nothing on this shelf yet.</p>'}
     </section>`;
   });
   
@@ -554,7 +579,8 @@ function shelfPage(key) {
   const shelf = SHELVES.find((s) => s.key === key);
   if (!shelf) return notFound();
   const list = books.filter(shelf.test).filter(passes);
-  const sorts = key === 'read' ? SORT_READ : SORT_DEFAULT;
+  // const sorts = key === 'read' ? SORT_READ : SORT_DEFAULT;
+  const sorts = key === 'read' ? SORT_READ : key === 'reading' ? SORT_READING : SORT_DEFAULT;
   sortList(list, sorts);
   const groups = ['lang', ...(key === 'buy' ? [] : ['own']), 'copies', ...(key === 'audio' ? [] : ['kind'])];
   const shownList = filters.kind === 'comic' ? list : stackSeries(list);   // asking for comics shows every issue
@@ -565,7 +591,8 @@ function shelfPage(key) {
     <h1>Books</h1>
     <nav class="stabs" aria-label="Shelves">${bar}</nav>
     ${chips(groups, sorts, list.length, key === 'all' || key === 'buy')}
-    ${list.length ? gridHtml(shownList, orStack(key === 'buy' ? haveCard : card)) : '<p class="empty">No titles match these filters yet.</p>'}
+${'' /* before 18 November 2026: orStack(key === 'buy' ? haveCard : card) */}
+    ${list.length ? gridHtml(shownList, orStack(key === 'buy' ? haveCard : key === 'reading' ? progressCard : card)) : '<p class="empty">No titles match these filters yet.</p>'}
     ${key === 'buy' ? startSwitch() : ''}
   </div>`;
 }
@@ -622,6 +649,10 @@ function seriesInfo(list, order = SORTS.series[1], name = '') {
 const arcInfo = (list) => seriesInfo(list, SORTS.arc[1], list[0].arc);
 // "#608" inside its own series; "Batman #608" where issues of several series can meet (a story arc).
 const issueLabel = (b) => (b.series && b.series_no != null ? `${b.series} #${b.series_no}` : b.title);
+// One title's progress, 0 to 100, while it is being read; null when none is recorded.
+const pctOf = (b) => (readingNow(b) && b.progress != null && b.progress !== '' && !Number.isNaN(Number(b.progress))
+  ? Math.max(0, Math.min(100, Math.round(Number(b.progress)))) : null);
+const pctBar = (pct) => `<span class="pbar" role="img" aria-label="${pct}% done"><i style="width:${pct}%"></i></span>`;
 const progressBar = (read, total) => `<span class="pbar" role="img" aria-label="${read} of ${total} read"><i style="width:${total ? Math.round((read / total) * 100) : 0}%"></i></span>`;
 const numberOf = (b) => (b.series_no != null ? `#${b.series_no}` : b.title);
 
@@ -852,7 +883,12 @@ function goalMeter(year, finished, goal, footer) {
 function statsPage() {
   document.title = 'Stats – Reading Ledger';
   const read = books.filter((b) => b.status === 'read');
-  const dated = read.filter((b) => /^\d{4}-\d{2}/.test(b.finished_at || ''));
+  // const dated = read.filter((b) => /^\d{4}-\d{2}/.test(b.finished_at || ''));
+  // Every read counts, rereads too: one entry per read, carrying that read's date ('2024-03-14', or '2019'
+  // when only the year is known). A year-only read counts in its year but in no month.
+  const events = books.flatMap((b) => readsOf(b).map((r) => ({ ...b, finished_at: readWhen(r) || null })));
+  const dated = events.filter((b) => /^\d{4}/.test(b.finished_at || ''));
+  const fullDate = (b) => b.finished_at.length > 4;
   if (!read.length) return `<div class="wrap"><h1>Stats</h1><p class="empty">Stats appear once some books are marked as read.</p></div>`;
   const thisYear = String(new Date().getFullYear());
   const byYear = new Map();
@@ -893,7 +929,8 @@ function statsPage() {
   const link = (b) => `<a class="${lc(b)}" href="#/book/${esc(b.id)}">${esc(b.title)}</a>`;
   const all = tally(read);
   const tile = (n, label, sub = '') => `<div class="stile"><b>${n}</b><span>${label}</span>${sub ? `<small>${sub}</small>` : ''}</div>`;
-  const undated = read.length - dated.length;
+  // const undated = read.length - dated.length;
+  const undated = events.length - dated.length;
 
   // the year before, for comparison: up to today's date when looking at the current year
   const now = new Date();
@@ -902,7 +939,7 @@ function statsPage() {
   if (byYear.has(prev)) {
     if (year === thisYear) {
       const today = `${prev}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      against = `${num(byYear.get(prev).filter((b) => b.finished_at.slice(0, 10) <= today).length)} by this date in ${prev}`;
+      against = `${num(byYear.get(prev).filter((b) => fullDate(b) && b.finished_at.slice(0, 10) <= today).length)} by this date in ${prev}`;
     } else against = `${num(byYear.get(prev).length)} in ${prev}`;
   }
   // months so far (this year) or twelve (a past year), and the busiest month
@@ -910,7 +947,7 @@ function statsPage() {
   const perMonth = count.total / monthsIn;
   const busiest = monthCols.reduce((best, c) => (c.count.total > best.count.total ? c : best), monthCols[0]);
   const perYm = new Map();
-  dated.forEach((b) => { const k = b.finished_at.slice(0, 7); perYm.set(k, (perYm.get(k) || 0) + 1); });
+  dated.filter(fullDate).forEach((b) => { const k = b.finished_at.slice(0, 7); perYm.set(k, (perYm.get(k) || 0) + 1); });
   const bestEver = [...perYm.entries()].sort((a, b) => b[1] - a[1])[0];
 
   // the row of covers: one month if a month is picked, otherwise the latest of the year; the same title is shown once
@@ -957,7 +994,7 @@ function statsPage() {
       ${heard.timed < heard.n && ownerHere() ? '<p class="hint vz-note">Add the length to an audiobook in the dashboard and its time is counted here.</p>' : ''}
     </section>` : '';
   const older = first < cut - 1;
-  const undatedNote = undated ? `<p class="hint vz-note">${num(undated)} finished ${undated === 1 ? 'title has' : 'titles have'} no finish date, so ${undated === 1 ? 'it is' : 'they are'} not in these charts.${ownerHere() ? ' <a href="admin.html#missing=finished">Add the dates in the dashboard</a>' : ''}</p>` : '';
+  const undatedNote = undated ? `<p class="hint vz-note">${num(undated)} ${undated === 1 ? 'read has' : 'reads have'} no finish date, so ${undated === 1 ? 'it is' : 'they are'} not in these charts.${ownerHere() ? ' <a href="admin.html#missing=finished">Add the dates in the dashboard</a>' : ''}</p>` : '';
 
   const yi = years.indexOf(year);
   const yearNav = `<nav class="yearnav" aria-label="Year">
@@ -995,7 +1032,7 @@ function statsPage() {
     ${recent.length ? `<section class="shelf-row" id="stat-row"><div class="row-head"><h2>${rowTitle}</h2>${month ? '<button type="button" data-month="">Show the whole year</button>' : `<a href="#/shelf/read">See the Read Shelf${ICON.right}</a>`}</div><div class="row">${recent.map(homeCard).join('')}</div>${shown.length > recent.length ? `<p class="hint">Showing the latest ${num(recent.length)} of ${num(shown.length)}.</p>` : ''}</section>` : ''}
     <h2 class="st-div">${SI('stack')}All Time</h2>
     <div class="st-two even">
-      <section class="vz-card"><div class="lead">${SI('check')}<b>${num(read.length)}</b><span>Finished So Far</span>${bestEver ? `<small>Best month: ${MONTHS[Number(bestEver[0].slice(5)) - 1]} ${bestEver[0].slice(0, 4)}, with ${num(bestEver[1])}</small>` : ''}</div>
+      <section class="vz-card"><div class="lead">${SI('check')}<b>${num(read.length)}</b><span>Finished So Far</span>${events.length > read.length ? `<small>${num(events.length)} reads in all, counting rereads</small>` : ''}${bestEver ? `<small>Best month: ${MONTHS[Number(bestEver[0].slice(5)) - 1]} ${bestEver[0].slice(0, 4)}, with ${num(bestEver[1])}</small>` : ''}</div>
         ${shareBar('Kind', [['Books', all.book, 'book'], ['Comics', all.comic, 'comic'], ['Audiobooks', all.audio, 'audio']])}
         ${shareBar('Language', [['Bengali', read.filter((b) => b.language === 'Bengali').length, 's1'], ['English', read.filter((b) => b.language === 'English').length, 's2']])}
         ${shareBar('Copy of the Books Read', [['Hardcopy', copies.hard, 's1'], ['Ebook', copies.ebook, 's2'], ['Both', copies.both, 's3'], ['Not recorded', copies.none, 'none']])}
@@ -1037,6 +1074,15 @@ function fmtDate(iso) {
   return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : '';
 }
 
+// Book Details (and Audiobook Details) are always open on a wide screen and folded on a narrow one.
+// The page decides this when it is drawn; these keep it right when the window is resized, the phone
+// is turned, or the browser switches to a phone view (fixed 18 November 2026: before, a page drawn
+// narrow stayed folded on a wide screen, where the heading cannot be clicked).
+[['(min-width: 1001px)', '.bookpage .facts-more'], ['(min-width: 901px)', '.detail.listen .facts-more']].forEach(([query, selector]) => {
+  const mq = window.matchMedia(query);
+  mq.addEventListener('change', () => document.querySelectorAll(selector).forEach((d) => { d.open = mq.matches; }));
+});
+
 function detailPage(id) {
   const b = books.find((x) => String(x.id) === id);
   if (!b) return notFound();
@@ -1047,13 +1093,51 @@ function detailPage(id) {
   const yt = link
     ? `<a class="btn primary block" href="${esc(link)}" target="_blank" rel="noopener noreferrer">${ICON.play}Listen on YouTube</a>` : '';
   const finished = b.status === 'read' && fmtDate(b.finished_at) ? `${audio ? 'Listened' : 'Finished'} ${fmtDate(b.finished_at)}` : '';
+  // ---- reads, rereads and progress (added 18 November 2026) ----
+  const reads = readsOf(b);
+  const rereading = rereadingNow(b);
+  const many = reads.length > 1 || (rereading && reads.length > 0);     // a history list is worth showing
+  const pct = pctOf(b);
+  const markPlain = b.progress_mark ? (audio ? `${b.progress_mark}${b.duration ? ` of ${b.duration}` : ''}`
+    : `page ${b.progress_mark}${b.pages ? ` of ${num(b.pages)}` : ''}`) : '';
+  const ago = (iso) => {
+    const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return '';
+    const days = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(m[1], m[2] - 1, m[3])) / 864e5);
+    return days <= 0 ? 'today' : days === 1 ? 'yesterday' : days < 7 ? `${days} days ago` : `on ${fmtDate(iso)}`;
+  };
+  const progSub = [rereading ? `${ordinal(reads.length + 1)} ${audio ? 'listen' : 'read'}` : '',
+    b.started_at && readingNow(b) ? `started ${fmtDate(b.started_at)}` : '',
+    pct != null && b.progress_on ? `updated ${ago(b.progress_on)}` : ''].filter(Boolean).join(' \u00b7 ');
+  const progressHtml = pct != null
+    ? `<section class="inseries myprog"><h2 class="h3">Your Progress</h2>
+      <p class="inseries-n"><b class="num">${pct}%</b>${markPlain ? ` \u00b7 ${esc(markPlain)}` : ''}</p>
+      ${pctBar(pct)}${progSub ? `<p class="myprog-sub">${esc(progSub)}</p>` : ''}</section>`
+    : progSub ? `<p class="meta myprog-only">${esc(progSub)}</p>` : '';
+  const timesWord = (n) => (n === 1 ? 'Once' : n === 2 ? 'Twice' : `${num(n)} Times`);
+  let historyHtml = '';
+  if (many) {
+    const undatedN = reads.filter((r) => !readWhen(r)).length;
+    const items = [];
+    reads.forEach((r, i) => {
+      const w = readWhen(r);
+      if (w) items.push(`<li><span>${ordinal(i + 1)}</span>${w.length > 4 ? `${audio ? 'Listened' : 'Finished'} ${fmtDate(w)}` : esc(w)}</li>`);
+    });
+    items.reverse();                                  // newest first
+    if (undatedN) items.push(`<li><span>${undatedN > 1 ? `1st\u2013${ordinal(undatedN)}` : '1st'}</span>${undatedN > 1 ? 'No dates' : 'No date'}</li>`);
+    historyHtml = `<section class="inseries myreads"><h2 class="h3">${audio ? 'Listened' : 'Read'} ${timesWord(reads.length)}</h2><ol class="readlist">${items.join('')}</ol></section>`;
+  }
+  const finishedLine = many ? '' : finished;            // the list already shows every finish date
   const facts = [
     ['Format', b.format],
     [audio ? 'Duration' : 'Pages', audio ? b.duration : b.pages],
     ['Published', b.pub_year],
     ['Language', b.language],
     ['Status', statusWord(b)],
-    ...(b.status === 'read' ? [['Date finished', fmtDate(b.finished_at)]] : []),
+    // ...(b.status === 'read' ? [['Date finished', fmtDate(b.finished_at)]] : []),
+    ...(b.status === 'read' ? [[many ? 'Last finished' : 'Date finished', fmtDate(b.finished_at) || (reads.length ? readWhen(reads[reads.length - 1]) : '')]] : []),
+    ...(many ? [[audio ? 'Times listened' : 'Times read', `${num(reads.length)}${rereading ? ` (${ordinal(reads.length + 1)} in progress)` : ''}`]] : []),
+    ...(pct != null ? [['Progress', `${pct}%${markPlain ? ` (${markPlain})` : ''}`]] : []),
     ['Ownership', OWN[b.ownership]],
     ...(audio ? [] : [['Copies', (b.copies || []).filter((c) => COPY[c]).map((c) => COPY[c]).join(' and ')]]),
   ].filter(([, v]) => !audio || v || v === 0)      // an audiobook's empty rows are left out
@@ -1153,7 +1237,8 @@ function detailPage(id) {
       <div class="detail-body">
         <div class="dtags">${statusBadge(b)}${badge(b)}</div>
         ${twin ? `<p class="twin">Also on the shelf as a book: <a class="${lc(twin)}" href="#/book/${esc(twin.id)}">${esc(twin.title)}</a></p>` : ''}
-        ${finished ? `<p class="meta">${finished}</p>` : ''}
+        ${progressHtml}${historyHtml}
+        ${finishedLine ? `<p class="meta">${finishedLine}</p>` : ''}
         ${b.description ? `<p class="desc ${lc(b)}">${esc(b.description)}</p>` : ''}
         ${genresHtml}
       </div>
@@ -1180,7 +1265,8 @@ function detailPage(id) {
         <div class="dtags">${statusBadge(b)}${badge(b)}${copyBadges(b)}</div>
       </header>
       <div class="detail-body">
-        ${finished ? `<p class="meta fin">${finished}</p>` : ''}
+        ${progressHtml}${historyHtml}
+        ${finishedLine ? `<p class="meta fin">${finishedLine}</p>` : ''}
         ${b.description ? `<p class="desc ${lc(b)}${String(b.description).length > 420 ? ' clamp' : ''}">${esc(String(b.description).replace(/<br\s*\/?>/gi, '\n'))}</p>${String(b.description).length > 420 ? '<button type="button" class="desc-more" data-desc>Read more</button>' : ''}` : ''}
         ${genresHtml}
       </div>
