@@ -309,7 +309,8 @@ function startReview({ mode, name, issues }) {
     const volume = mode === 'series' ? name : (x.volume || name);
     const existing = (x.no != null && have.get(`${seriesCore(volume)}#${x.no}`)) || null;
     const needsCover = Boolean(existing && !coverOf(existing) && x.cover);
-    const canFill = needsCover || Boolean(existing && hasArc() && !existing.arc);
+    // const canFill = needsCover || Boolean(existing && hasArc() && !existing.arc);
+    const canFill = needsCover || Boolean(existing && hasArc() && (!existing.arc || existing.arc_no == null));   // also: an arc with no part number (20 November 2026)
     return { ...x, volume, seriesNo: x.no, arcNo: mode === 'arc' ? i + 1 : null, existing, needsCover, canFill, sel: existing ? canFill : true, status: 'want' };
   });
   // If these issues are on the shelf under a slightly different series name ("Batman (1940-2011)"), keep that name.
@@ -342,7 +343,7 @@ function stepReview() {
     <div class="imp-list" id="cv-list"></div>`,
   '<button class="btn" type="button" id="cv-back">Back</button><button class="btn primary" type="button" id="cv-import">Import</button>');
   const haveText = (r) => (!r.canFill ? 'On your shelf already,<br>nothing to add'
-    : `On your shelf already:<br>only its ${[r.needsCover ? 'cover' : '', arcs && !r.existing.arc ? 'story arc' : ''].filter(Boolean).join(' and ')} ${r.needsCover && arcs && !r.existing.arc ? 'are' : 'is'} added`);
+    : `On your shelf already:<br>only its ${[r.needsCover ? 'cover' : '', arcs && !r.existing.arc ? 'story arc' : arcs && r.existing.arc_no == null ? 'story arc part number' : ''].filter(Boolean).join(' and ')} ${r.needsCover && arcs && (!r.existing.arc || r.existing.arc_no == null) ? 'are' : 'is'} added`);
   const draw = () => {
     $('cv-list').innerHTML = rows.map((r, i) => `<div class="cv-issue${r.sel ? '' : ' off'}">
         <input type="checkbox" data-sel="${i}" aria-label="Import ${esc(r.volume)} #${esc(r.number)}"${r.sel ? ' checked' : ''}${r.existing && !r.canFill ? ' disabled' : ''}>
@@ -387,7 +388,9 @@ async function runImport() {
   const writers = $('cv-writers').checked;
   const run = (S.run += 1);
   // Which issues need one more question to Comic Vine: new ones for the writer, any without an arc for the arc.
-  const ask = picked.filter((r) => (!r.existing && writers) || (autoArc && !(r.existing && r.existing.arc)));
+  // const ask = picked.filter((r) => (!r.existing && writers) || (autoArc && !(r.existing && r.existing.arc)));
+  const ask = picked.filter((r) => (!r.existing && writers) || (autoArc && !(r.existing && r.existing.arc && r.existing.arc_no != null)));
+  ask.forEach((r) => { r.lookup = ''; });
   stepBusy('Importing', ask.length ? 'Asking Comic Vine about each issue…' : 'Saving…');
   for (let i = 0; i < ask.length && !stale(run); i += 1) {
     const r = ask[i];
@@ -397,10 +400,23 @@ async function runImport() {
       r.author = writersOf(d.person_credits);
       r.about = plainText(d.deck || d.description);
       r.foundArc = ((d.story_arc_credits || [])[0] || {}).name || '';
-    } catch (err) { /* one missing answer should not stop the import */ }
+      r.lookup = 'ok';
+    } catch (err) { r.lookup = 'failed'; /* one missing answer should not stop the import; it is reported at the end */ }
   }
   if (stale(run)) return;
   const arcOf = (r) => typedArc || (autoArc ? r.foundArc || '' : '');
+  // Part numbers when a whole series is imported (20 November 2026): the issues of each arc are numbered in
+  // series order, counting the arc's issues already on the shelf too, so "Planet Brainiac" reads Part 1, 2, 3.
+  if (S.mode === 'series') {
+    const byArc = new Map();
+    picked.forEach((r) => { const a = arcOf(r) || (r.existing && r.existing.arc) || ''; if (a) { if (!byArc.has(a)) byArc.set(a, []); byArc.get(a).push(r); } });
+    byArc.forEach((list, a) => {
+      const mine = new Set(list.map((r) => r.existing && r.existing.id).filter(Boolean));
+      const shelf = hooks.getBooks().filter((b) => b.arc === a && !mine.has(b.id)).map((b) => ({ no: Number(b.series_no) || 0 }));
+      const all = [...list.map((r) => ({ no: Number(r.seriesNo) || 0, r })), ...shelf].sort((x, y) => x.no - y.no);
+      all.forEach((x, i) => { if (x.r) x.r.arcNo = i + 1; });
+    });
+  }
   const withSeries = hasSeries();
   const rows = picked.filter((r) => !r.existing).map((r) => ({
     id: crypto.randomUUID(),
@@ -420,6 +436,7 @@ async function runImport() {
     const patch = {};
     if (r.needsCover) patch.cover_url = r.cover;
     if (arcs && !r.existing.arc && arcOf(r)) { patch.arc = arcOf(r); patch.arc_no = r.arcNo; }
+    else if (arcs && r.existing.arc && r.existing.arc_no == null && r.arcNo && (!arcOf(r) || arcOf(r) === r.existing.arc)) patch.arc_no = r.arcNo;   // number only
     if (withSeries && !r.existing.series) { patch.series = seriesOf(r); patch.series_no = r.seriesNo; }
     return { id: r.existing.id, patch };
   }).filter((u) => Object.keys(u.patch).length);
@@ -435,10 +452,16 @@ async function runImport() {
     }
     await hooks.refresh();
     const unknown = rows.filter((r) => r.author === 'Unknown').length;
+    // What Comic Vine said about each issue it was asked about (20 November 2026)
+    const label = (list) => list.map((r) => `#${r.number}`).join(', ');
+    const noArc = autoArc ? ask.filter((r) => r.lookup === 'ok' && !r.foundArc && !(r.existing && r.existing.arc)) : [];
+    const failed = ask.filter((r) => r.lookup === 'failed');
     const arcNames = [...new Set([...rows.map((r) => r.arc), ...updates.map((u) => u.patch.arc)].filter(Boolean))];
     show('Done', `<div class="imp-center"><p><b>${[saved ? `${plural(saved, 'issue', 'issues')} added` : '', updated ? `${plural(updated, 'issue', 'issues')} you already had updated` : ''].filter(Boolean).join(', and ') || 'Nothing needed changing'}</b>.</p>
       ${arcNames.length ? `<p class="hint">Story ${arcNames.length === 1 ? 'arc' : 'arcs'}: ${esc(arcNames.slice(0, 8).join(', '))}${arcNames.length > 8 ? '…' : ''}</p>` : ''}
       ${unknown ? `<p class="hint">${plural(unknown, 'issue has', 'issues have')} no writer on Comic Vine and were saved as “Unknown”.</p>` : ''}
+      ${noArc.length ? `<p class="hint">Comic Vine lists no story arc for ${plural(noArc.length, 'issue', 'issues')}: ${esc(label(noArc))}. Its data has gaps; a DC Database (Fandom) link in the book form can fill these.</p>` : ''}
+      ${failed.length ? `<p class="hint">Comic Vine did not answer for ${plural(failed.length, 'issue', 'issues')}: ${esc(label(failed))}. Run this import again later to fill them.</p>` : ''}
       ${saved ? '<p class="hint">Issues marked Read have no finish date. Add one in the book form if you want them in the yearly stats.</p>' : ''}</div>`,
     '<button class="btn" type="button" id="cv-more">Import more</button><button class="btn primary" type="button" id="cv-done">Done</button>');
     $('cv-more').addEventListener('click', () => { S.results = null; S.query = ''; stepSearch(); });

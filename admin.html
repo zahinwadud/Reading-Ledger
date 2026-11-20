@@ -151,11 +151,16 @@
     </header>
     <div class="dlg-body" id="dlg-body">
     <!-- Fill from a saved Goodreads page (added 19 November 2026) -->
-    <div class="gp-drop" id="gp-drop" tabindex="0" role="button" aria-label="Fill from a saved Goodreads page: choose or drop the saved page and its cover">
+    <div class="gp-drop" id="gp-drop" tabindex="0" role="button" aria-label="Fill from a web page: choose or drop a saved page and its cover">
       <span class="gp-ic" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v8M5 5.5l3-3 3 3M2.5 10.5V13a.5.5 0 0 0 .5.5h10a.5.5 0 0 0 .5-.5v-2.5"/></svg></span>
-      <span><b>Fill from a saved Goodreads page</b><br>Drop the saved page (.htm) here, together with its cover picture from the “_files” folder, or click to choose them.</span>
+      <!-- <span><b>Fill from a saved Goodreads page</b><br>Drop the saved page (.htm) here, together with its cover picture from the “_files” folder, or click to choose them.</span> -->
+      <span><b>Fill from a web page</b><br>Drop a saved page (.htm) here, with its cover picture or its “_files” folder, or click to choose.</span>
     </div>
     <input id="gp-file" type="file" accept=".htm,.html,text/html,image/*" multiple hidden>
+    <div class="gp-paste">
+      <textarea id="gp-text" rows="2" placeholder="Or paste a Fandom link (DC Database, Tin Goyenda Wiki…), or a book page’s text (Ctrl+A, Ctrl+C on the page)" aria-label="A Fandom link, or a book page's text"></textarea>
+      <button class="btn" type="button" id="gp-read">Read</button>
+    </div>
     <div class="gp-card" id="gp-card" hidden></div>
     <div class="fgrid">
       <div class="field full">
@@ -183,7 +188,9 @@
 
       <div class="field full" id="g-youtube" hidden><label for="f-youtube">YouTube link</label><input id="f-youtube" type="url" placeholder="https://www.youtube.com/watch?v=..."><p class="hint">The video’s thumbnail is used automatically as the cover.</p><div class="yt-prev" id="yt-prev" hidden><img id="yt-prev-img" alt="YouTube thumbnail preview"></div><p class="err" id="e-youtube" role="alert"></p></div>
       <div class="field"><label for="f-status">Reading status</label>
-        <select id="f-status"><option value="want">Want to Read</option><option value="reading">Currently Reading</option><option value="read">Read</option></select></div>
+        <!-- <select id="f-status"><option value="want">Want to Read</option><option value="reading">Currently Reading</option><option value="read">Read</option></select></div> -->
+        <select id="f-status"><option value="want">Want to Read</option><option value="reading">Currently Reading</option><option value="read">Read</option><option value="reread" id="f-status-reread" hidden disabled>Rereading</option></select>
+        <p class="hint" id="status-note" hidden></p></div>
       <div class="field"><label for="f-ownership">Ownership</label>
         <select id="f-ownership"><option value="owned">Owned</option><option value="buy">Want to Buy</option></select></div>
 

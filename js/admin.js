@@ -583,8 +583,17 @@ function renderReads() {
       <button type="button" class="btn icon-x" data-rx="${i}" aria-label="Remove read ${i + 1}">\u00d7</button>
     </li>`).join('') || '<li class="none">No reads recorded.</li>';
 }
+// The status menu has a fourth choice, "Rereading", for a title read before (20 November 2026).
+// It is saved as status Read with rereading on, exactly like the pill in the list.
+const statusOf = () => ($('f-status').value === 'reread' ? 'read' : $('f-status').value);
 function syncStatus() {
-  const st = $('f-status').value;
+  const audioNow = $('f-format').value === 'Audiobook';
+  const opt = $('f-status-reread');
+  const readBefore = formReads.length > 0;
+  opt.hidden = opt.disabled = !readBefore && $('f-status').value !== 'reread';
+  opt.textContent = audioNow ? 'Relistening' : 'Rereading';
+  formRereading = $('f-status').value === 'reread';
+  const st = statusOf();
   if (st !== 'read') formRereading = false;
   const active = st === 'reading' || formRereading;
   const audio = $('f-format').value === 'Audiobook';
@@ -620,20 +629,24 @@ $('read-add').addEventListener('click', () => {
 });
 $('reread-start').addEventListener('click', () => {
   formRereading = true;
+  $('f-status').value = 'reread'; lastStatus = 'reread';
   clearProgress();
   $('f-started').value = today();
   syncStatus();
   $('f-pct').focus();
 });
 $('read-finish').addEventListener('click', () => {
+  // a second read on the same day is almost always a double click: ask first (20 November 2026)
+  if (formReads.some((r) => r.d === today()) && !confirm('A read finished today is already listed. Add another one for today?')) return;
   formReads.push({ d: today() });
   formRereading = false;
-  $('f-status').value = 'read';
+  $('f-status').value = 'read'; lastStatus = 'read'; $('status-note').hidden = true;
   clearProgress();
   renderReads(); syncStatus();
   toast('Added a read for today. Press Save to keep it.');
 });
-$('reread-stop').addEventListener('click', () => { formRereading = false; clearProgress(); syncStatus(); });
+// $('reread-stop').addEventListener('click', () => { formRereading = false; clearProgress(); syncStatus(); });
+$('reread-stop').addEventListener('click', () => { formRereading = false; $('f-status').value = 'read'; lastStatus = 'read'; $('status-note').hidden = true; clearProgress(); syncStatus(); });
 // a page number or the time heard fills in the percent
 $('f-page').addEventListener('input', () => {
   const page = Number($('f-page').value), pages = Number($('f-pages').value);
@@ -647,8 +660,17 @@ $('f-pct').addEventListener('input', () => { $('f-page').value = ''; $('f-time')
 // Marking a title Read by hand adds a read for today, unless reads are already listed.
 let lastStatus = '';
 $('f-status').addEventListener('change', () => {
-  if ($('f-status').value === 'read' && lastStatus !== 'read' && !formReads.length) { formReads.push({ d: today() }); renderReads(); }
-  lastStatus = $('f-status').value;
+  const sel = $('f-status');
+  $('status-note').hidden = true;
+  // Read before and started again: that is a reread. "Currently Reading" becomes "Rereading", and the form says so.
+  if (sel.value === 'reading' && formReads.length) {
+    sel.value = 'reread';
+    $('status-note').textContent = `Read before, so this is saved as a ${$('f-format').value === 'Audiobook' ? 'relisten' : 'reread'}: it stays on Read and shows as ${$('f-format').value === 'Audiobook' ? 'Relistening' : 'Rereading'}. Choose Read when you finish it.`;
+    $('status-note').hidden = false;
+  }
+  if (sel.value === 'reread' && lastStatus !== 'reread') { clearProgress(); $('f-started').value = today(); }
+  if (sel.value === 'read' && lastStatus !== 'read' && lastStatus !== 'reread' && !formReads.length) { formReads.push({ d: today() }); renderReads(); }
+  lastStatus = sel.value;
 });
 // "4", "4.5" or Bengali digits ("৪") -> a number, or null when empty / not a number.
 const BN_DIGITS = '\u09e6\u09e7\u09e8\u09e9\u09ea\u09eb\u09ec\u09ed\u09ee\u09ef';
@@ -705,18 +727,25 @@ function openPanel(book) {
   $('f-format').value = b.format;
   $('f-pages').value = b.pages || '';
   $('f-duration').value = b.duration || '';
-  $('f-status').value = b.status;
+  // $('f-status').value = b.status;
+  $('f-status').value = b.status === 'read' && b.rereading ? 'reread' : b.status;
+  $('status-note').hidden = true;
   $('f-ownership').value = b.ownership;
   // $('f-finished').value = b.finished_at || '';
   formReads = readsOf(b).map((r) => (r.d ? { d: String(r.d).slice(0, 10) } : r.y ? { y: Number(r.y) } : {}));
   formRereading = b.status === 'read' && !!b.rereading;
-  lastStatus = b.status;
+  lastStatus = $('f-status').value;
   $('f-pct').value = b.progress ?? '';
   $('f-page').value = b.format !== 'Audiobook' && /^\d+$/.test(String(b.progress_mark || '')) ? b.progress_mark : '';
   $('f-time').value = b.format === 'Audiobook' ? (b.progress_mark || '') : '';
   $('f-started').value = b.started_at || '';
   setErr('progress', ''); setErr('reads', '');
   renderReads();
+  // Currently Reading, but read before: point at the Rereading choice (20 November 2026)
+  if (b.status === 'reading' && formReads.length) {
+    $('status-note').textContent = `You have ${b.format === 'Audiobook' ? 'listened to' : 'read'} this before. Choose ${b.format === 'Audiobook' ? 'Relistening' : 'Rereading'} to count this as a ${b.format === 'Audiobook' ? 'relisten' : 'reread'}: it then also stays on Read.`;
+    $('status-note').hidden = false;
+  }
   $('g-series').hidden = $('g-series-no').hidden = !hasSeries();
   $('f-series').value = b.series || '';
   $('f-series-no').value = b.series_no ?? '';
@@ -804,7 +833,9 @@ async function handleImageUrl(url) {
   
   try {
     // Fetch the image from the external URL
-    const res = await fetch(url);
+    // const res = await fetch(url);
+    // No referrer: some image hosts (Fandom) send a placeholder picture to requests from other websites (20 November 2026)
+    const res = await fetch(url, { referrerPolicy: 'no-referrer' });
     if (!res.ok) throw new Error('Failed to fetch');
     const blob = await res.blob();
     
@@ -891,7 +922,9 @@ function validate() {
 // The reads and progress part of a save. "finished_at" keeps the latest full date, so everything that
 // already uses it (the carousel, sorting, the dashboard filters) keeps working.
 function readFields(audio) {
-  const status = $('f-status').value;
+  // const status = $('f-status').value;
+  const status = statusOf();
+  formRereading = $('f-status').value === 'reread';
   const reads = formReads.map((r) => (r.d ? { d: r.d } : r.y ? { y: r.y } : {}))
     .sort((a, c) => readWhen(a).localeCompare(readWhen(c)));
   if (status === 'read' && !reads.length) reads.push({});          // read once, date unknown
@@ -925,7 +958,8 @@ function collect() {
     duration: audio && val('duration') ? val('duration') : null,
     language: $('f-language').value,
     format: $('f-format').value,
-    status: $('f-status').value,
+    // status: $('f-status').value,
+    status: statusOf(),
     ownership: $('f-ownership').value,
     copies: audio ? [] : haveCopies.slice(),
     genres: picked.slice(),
@@ -985,7 +1019,8 @@ $('book-form').addEventListener('submit', async (e) => {
 initImport({ getBooks: () => books, refresh, toast, statusBadge, badge });
 initTools({ getBooks: () => books, refresh, toast, handleErr, hasSeries, hasArc, seriesNumber });
 initGoodreadsPage({
-  getBooks: () => books, getEditing: () => editing, handleFile, toast, openPanel, hasSeries, hasArc,
+  getBooks: () => books, getEditing: () => editing, handleFile, handleImageUrl, toast, openPanel, hasSeries, hasArc,
+  processImage, refresh, handleErr,                // for Get its issues (21 November 2026)
   coverShown: () => !$('preview').hidden,
   getGenres: () => picked.slice(),
   knownGenre: (g) => [...GENRES, ...books.flatMap((b) => b.genres || [])].find((k) => k.toLowerCase().replace(/s$/, '') === g.toLowerCase().replace(/s$/, '')) || g,

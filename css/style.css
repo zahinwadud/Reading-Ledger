@@ -1495,3 +1495,40 @@ button.vz-col { cursor: pointer; }
 .gp-act { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--page); }
 .gp-filled { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
 @media (max-width: 600px) { .gp-row { grid-template-columns: 22px 1fr; } .gp-k, .gp-v { grid-column: 2; } }
+
+/* ---------- book form: Fill from a web page, the paste box and the arc name (added 20 November 2026) ---------- */
+.gp-drop { margin-bottom: 8px; }
+.gp-paste { display: flex; gap: 8px; align-items: stretch; margin: 0 0 16px; }
+.gp-paste textarea { flex: 1; min-height: 44px; resize: vertical; font: 14px/1.4 var(--ui); padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); color: var(--ink); }
+.gp-paste .btn { align-self: flex-start; }
+.gp-arcname { font: 600 14px var(--ui); padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); width: min(100%, 320px); margin-top: 4px; }
+.gp-row input.gp-arcname { width: min(100%, 320px); height: auto; margin: 4px 0 0; accent-color: auto; }
+
+/* ---------- book form: Get its issues (added 21 November 2026) ---------- */
+.gp-act .gp-issues { margin-right: auto; }
+.gi-wrap { padding: 12px 14px; font: 14px/1.45 var(--ui); }
+.gi-wrap .progress { margin: 8px 0; }
+.gi-title { margin: 0 0 8px; }
+.gi-maps { margin: 0 0 10px; }
+.gi-maps .hint { margin: 0 0 4px; }
+.gi-map { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 4px 0; }
+.gi-map span { color: var(--muted); }
+.gi-map input { flex: 1; min-width: 180px; font: 600 14px var(--ui); padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
+.gi-opts .imp-opt { margin: 6px 0; }
+.gi-sel { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 8px 0 4px; color: var(--muted); }
+.gi-sel select { font: 14px var(--ui); padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
+.gi-head { display: flex; justify-content: space-between; align-items: baseline; margin: 12px 0 4px; color: var(--muted); }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; }
+.gi-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); max-height: 460px; overflow: auto; }
+.gi-row { border-bottom: 1px solid var(--line); }
+.gi-row label { display: grid; grid-template-columns: 22px 40px 1fr; gap: 10px; align-items: start; padding: 8px 2px; cursor: pointer; }
+.gi-row.off label { cursor: default; opacity: .65; }
+.gi-row input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--accent); }
+.gi-cov { width: 40px; aspect-ratio: 2 / 3; background: var(--line); border-radius: 3px; overflow: hidden; }
+.gi-cov img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gi-info b { display: block; font-weight: 600; }
+.gi-info .hint { display: block; }
+.gi-st { font-style: italic; }
+.gi-state { display: inline-block; margin-top: 3px; font-size: 12px; font-weight: 600; }
+.gi-new { color: var(--owned); } .gi-fill { color: var(--accent); } .gi-have, .gi-missing { color: var(--muted); }
+.gi-prog { margin-top: 10px; }
