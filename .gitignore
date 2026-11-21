@@ -1,0 +1,16 @@
+# Only the website goes to GitHub. Everything else in this folder
+# (Font, Goodreads, backups, notes, data, Claude outputs) stays on the PC.
+# Everything is ignored first, then the site files are let back in.
+# A new top-level file or folder for the site must be added below.
+/*
+!/.gitignore
+!/README.md
+!/index.html
+!/admin.html
+!/favicon.ico
+!/manifest.webmanifest
+!/sw.js
+!/css/
+!/js/
+!/icons/
+!/supabase/
