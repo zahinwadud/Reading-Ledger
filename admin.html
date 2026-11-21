@@ -231,6 +231,21 @@
         <p class="err" id="e-reads" role="alert"></p>
       </div>
 
+      <!-- Reader file (21 November 2026): the book's EPUB/PDF in the private Backblaze bucket -->
+      <div class="field full" id="g-file" hidden>
+        <label>Reader file</label>
+        <p class="hint">Only you, your sister and your wife can open it, in the Reader.</p>
+        <div class="rf">
+          <p class="rf-state" id="rf-state"></p>
+          <div class="rf-acts" id="rf-acts">
+            <label class="btn" for="rf-input" id="rf-pick">Add a file</label>
+            <input id="rf-input" type="file" accept=".epub,.pdf,.cbz,application/epub+zip,application/pdf" hidden>
+            <a class="btn" id="rf-open" href="./reader.html" hidden>Open in Reader</a>
+            <button class="btn" type="button" id="rf-remove" hidden>Remove file</button>
+          </div>
+        </div>
+      </div>
+
       <div class="field full" id="g-copies">
         <label id="copies-label">Copies I have</label>
         <p class="hint">Pick one or both. Not shown in the list, only on the book page.</p>

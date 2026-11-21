@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Reader · Reading Ledger</title>
+<meta name="robots" content="noindex">
+<script>
+  /* The site's light/dark choice, before the page paints. */
+  try { var t = localStorage.getItem('theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/reader.css">
+<link rel="icon" type="image/x-icon" href="favicon.ico">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1d2226" media="(prefers-color-scheme: dark)">
+</head>
+<body class="rd">
+
+<!-- Sign in (sister, wife, or you on a new phone) -->
+<main class="rd-page" id="rd-signin" hidden>
+  <h1>Reader</h1>
+  <p class="hint">Sign in to read the books kept for you.</p>
+  <form id="rd-form" class="rd-form">
+    <div class="field"><label for="rd-email">Email</label><input id="rd-email" type="email" autocomplete="username" required></div>
+    <div class="field"><label for="rd-pass">Password</label><input id="rd-pass" type="password" autocomplete="current-password" required></div>
+    <p class="err" id="rd-err" role="alert"></p>
+    <button class="btn primary" type="submit">Sign in</button>
+  </form>
+  <p><a href="./">← Back to the shelf</a></p>
+</main>
+
+<!-- The books that have a file, and what is kept on this phone -->
+<main class="rd-page" id="rd-list" hidden>
+  <div class="rd-head"><h1>Reader</h1><a class="btn" href="./">Shelf</a></div>
+  <div id="rd-books"></div>
+  <h2>On this phone</h2>
+  <div id="rd-saved"></div>
+  <p class="rd-who" id="rd-who"></p>
+</main>
+
+<!-- Loading a book -->
+<main class="rd-page rd-loading" id="rd-load" hidden>
+  <p class="rd-load-title" id="rd-load-title"></p>
+  <div class="progress"><i id="rd-load-bar"></i></div>
+  <p class="hint" id="rd-load-msg">Opening…</p>
+  <p class="err" id="rd-load-err" role="alert"></p>
+  <p><a href="./reader.html" id="rd-load-back" hidden>← All books</a></p>
+</main>
+
+<!-- The book itself -->
+<div class="rd-book" id="rd-book" hidden>
+  <header class="rd-bar rd-top">
+    <button class="rd-icon" type="button" id="rd-back" aria-label="Close the book">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <p class="rd-title" id="rd-title"></p>
+    <button class="rd-icon" type="button" id="rd-toc-btn" aria-label="Contents" aria-expanded="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>
+    </button>
+    <button class="rd-icon" type="button" id="rd-aa-btn" aria-label="Text and colours" aria-expanded="false"><span class="rd-aa">Aa</span></button>
+  </header>
+
+  <div class="rd-view" id="rd-view"></div>
+
+  <footer class="rd-bar rd-bottom">
+    <input type="range" id="rd-slider" min="0" max="1" step="0.0005" value="0" aria-label="Position in the book">
+    <p class="rd-where"><span id="rd-chapter"></span><span id="rd-pct"></span></p>
+  </footer>
+
+  <!-- Contents -->
+  <div class="rd-panel" id="rd-toc" hidden><div class="rd-panel-in"><p class="rd-panel-title">Contents</p><ol id="rd-toc-list"></ol></div></div>
+
+  <!-- Text and colours -->
+  <div class="rd-panel rd-aa-panel" id="rd-aa" hidden><div class="rd-panel-in">
+    <p class="rd-panel-title">Text size</p>
+    <div class="rd-row"><button class="btn" type="button" data-size="-1" aria-label="Smaller text">A−</button><span id="rd-size">100%</span><button class="btn" type="button" data-size="1" aria-label="Bigger text">A+</button></div>
+    <p class="rd-panel-title">Line spacing</p>
+    <div class="rd-row"><button class="btn" type="button" data-space="-1" aria-label="Tighter lines">−</button><span id="rd-space">1.5</span><button class="btn" type="button" data-space="1" aria-label="Looser lines">+</button></div>
+    <p class="rd-panel-title">Colours</p>
+    <div class="rd-themes" role="radiogroup" aria-label="Colours">
+      <button type="button" role="radio" data-theme-pick="site">Site</button>
+      <button type="button" role="radio" data-theme-pick="light">Light</button>
+      <button type="button" role="radio" data-theme-pick="sepia">Sepia</button>
+      <button type="button" role="radio" data-theme-pick="black">Black</button>
+    </div>
+  </div></div>
+
+  <!-- A question at the bottom (start reading / finished?) -->
+  <div class="rd-ask" id="rd-ask" hidden><p id="rd-ask-text"></p><div class="rd-row"><button class="btn" type="button" id="rd-ask-no">Not now</button><button class="btn primary" type="button" id="rd-ask-yes">Yes</button></div></div>
+  <div class="rd-toast" id="rd-toast" role="status" hidden></div>
+</div>
+
+<script type="module" src="js/reader.js"></script>
+</body>
+</html>

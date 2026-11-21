@@ -194,3 +194,26 @@ export function ordinal(n) {
 }
 // Is this title being read (or reread) right now?
 export const readingNow = (b) => b.status === 'reading' || (b.status === 'read' && !!b.rereading);
+
+// ---------- the reader's Read button (added 21 November 2026) ----------
+// Which books have a reader file. Only signed-in readers can see that list, so for everyone else it
+// stays empty and no Read button appears. Kept in localStorage so the button shows at once.
+export function readerFiles() {
+  try { return new Set((JSON.parse(localStorage.getItem('rl-reader-files') || '{}').ids) || []); } catch (e) { return new Set(); }
+}
+// Ask again in the background with the saved sign-in (when it has not run out). Returns the new set,
+// or null when there is nobody signed in.
+export async function refreshReaderFiles() {
+  if (!configured) return null;
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(`sb-${new URL(BASE).hostname.split('.')[0]}-auth-token`) || 'null'); } catch (e) { /* none */ }
+  if (!s || !s.access_token) { try { localStorage.removeItem('rl-reader-files'); } catch (e) { /* ignore */ } return null; }
+  if (s.expires_at && s.expires_at * 1000 < Date.now()) return readerFiles();     // ran out: the reader page renews it
+  try {
+    const res = await fetch(`${BASE}/rest/v1/book_files?select=book_id`, { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${s.access_token}` } });
+    if (!res.ok) return readerFiles();
+    const ids = (await res.json()).map((r) => r.book_id);
+    localStorage.setItem('rl-reader-files', JSON.stringify({ ids, at: Date.now() }));
+    return new Set(ids);
+  } catch (e) { return readerFiles(); }
+}

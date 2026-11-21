@@ -1,5 +1,5 @@
 // Public site: home rows, shelf pages, book detail, live search.
-import { configured, fetchShelf, fetchSettings, readShelfCache, writeShelfCache, coverOf, ytThumb, ytId, esc, norm, authorsOf, initTheme, STATUS, OWN, readsOf, readWhen, ordinal, readingNow } from './core.js';
+import { configured, fetchShelf, fetchSettings, readShelfCache, writeShelfCache, coverOf, ytThumb, ytId, esc, norm, authorsOf, initTheme, STATUS, OWN, readsOf, readWhen, ordinal, readingNow, readerFiles, refreshReaderFiles } from './core.js';
 
 const app = document.getElementById('app');
 const qEl = document.getElementById('q');
@@ -1083,6 +1083,11 @@ function fmtDate(iso) {
   mq.addEventListener('change', () => document.querySelectorAll(selector).forEach((d) => { d.open = mq.matches; }));
 });
 
+// The Read button: only for signed-in readers, only for books with a file (21 November 2026).
+const readBtn = (id) => (readerFiles().has(id)
+  ? `<a class="btn primary read-btn" href="./reader.html#${esc(id)}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 6C9.8 4.5 6.5 4.2 3.5 5v13c3-.8 6.3-.5 8.5 1"/><path d="M12 6c2.2-1.5 5.5-1.8 8.5-1v13c-3-.8-6.3-.5-8.5 1"/><path d="M12 6v13"/></svg>Read</a>` : '');
+refreshReaderFiles().then(() => document.querySelectorAll('[data-read-slot]').forEach((el) => { el.innerHTML = readBtn(el.dataset.readSlot); }));
+
 function detailPage(id) {
   const b = books.find((x) => String(x.id) === id);
   if (!b) return notFound();
@@ -1263,6 +1268,7 @@ function detailPage(id) {
         ${authorHtml}
         <p class="meta">${meta}</p>
         <div class="dtags">${statusBadge(b)}${badge(b)}${copyBadges(b)}</div>
+        <div class="read-slot" data-read-slot="${esc(b.id)}">${readBtn(b.id)}</div>
       </header>
       <div class="detail-body">
         ${progressHtml}${historyHtml}

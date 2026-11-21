@@ -7,6 +7,7 @@ import {
 import { initImport } from './import.js';
 import { initTools, openTool } from './tools.js';
 import { initGoodreadsPage, gpReset, gpExtra, gpAfterSave } from './goodreads-page.js';   // Fill from a saved Goodreads page (19 November 2026)
+import { initFileBox, showFileBox } from './reader-admin.js';   // Reader file box (21 November 2026)
 
 const $ = (id) => document.getElementById(id);
 
@@ -716,6 +717,7 @@ function openPanel(book) {
   editing = book || null;
   newBlob = null; removeFlag = false;
   gpReset();
+  showFileBox(book || null, toast);   // Reader file (21 November 2026)
   FIELDS.forEach((f) => setErr(f, ''));
   setErr('cover', '');
   $('panel-title').textContent = book ? 'Edit Book' : 'Add Book';
@@ -1017,6 +1019,7 @@ $('book-form').addEventListener('submit', async (e) => {
 });
 
 initImport({ getBooks: () => books, refresh, toast, statusBadge, badge });
+initFileBox();   // Reader file box (21 November 2026)
 initTools({ getBooks: () => books, refresh, toast, handleErr, hasSeries, hasArc, seriesNumber });
 initGoodreadsPage({
   getBooks: () => books, getEditing: () => editing, handleFile, handleImageUrl, toast, openPanel, hasSeries, hasArc,

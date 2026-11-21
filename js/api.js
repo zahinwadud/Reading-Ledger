@@ -169,6 +169,8 @@ export async function patchBook(id, patch) {
 }
 
 export async function deleteBook(book) {
+  // Its reader file goes first, so nothing is left behind in Backblaze (21 November 2026).
+  if (await fileOf(book.id).catch(() => null)) await bookFileAction('remove', book.id);
   const { error } = await sb.from('books').delete().eq('id', book.id);
   if (error) throw error;
   if (book.cover_path) await removeCover(book.cover_path);
@@ -202,3 +204,85 @@ export async function getSession() {
   return data.session;
 }
 export function onAuth(callback) { if (sb) sb.auth.onAuthStateChange((event, session) => callback(event, session)); }
+
+// ---------- the reader (added 21 November 2026) ----------
+// Book files live in a private Backblaze B2 bucket. The Edge Function "book-file" holds the key and
+// only helps people allowed to read (see supabase/reader.sql and supabase/functions/book-file).
+
+// What went wrong inside an Edge Function call, in its own words when it gave any.
+async function fnError(error) {
+  let msg = error.message;
+  try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch (e) { /* no details */ }
+  return new Error(msg);
+}
+
+export const sbReady = () => !!sb;
+
+// One book, fresh from the database (the reader page does not load the whole shelf).
+export async function bookById(id) {
+  const { data, error } = await sb.from('books').select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+// May the signed-in person read? (You always; others only if listed in "readers".)
+export async function amReader() {
+  const { data, error } = await sb.rpc('is_reader');
+  if (error) throw error;
+  return !!data;
+}
+
+// The file kept for a book, or null. Only readers see these rows.
+export async function fileOf(bookId) {
+  const { data, error } = await sb.from('book_files').select('*').eq('book_id', bookId).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+// Every book with a file, with its shelf details, newest upload first.
+export async function filesWithBooks() {
+  const { data, error } = await sb.from('book_files')
+    .select('book_id, kind, size, uploaded_at, file_id, books(id, title, author, cover_path, cover_url, status, rereading, language)')
+    .order('uploaded_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+// Where the signed-in person stopped in a book: { location, fraction, updated_at } or null.
+export async function positionOf(bookId) {
+  const { data, error } = await sb.from('reading_positions').select('location, fraction, updated_at').eq('book_id', bookId).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+export async function savePosition(bookId, location, fraction, at) {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) throw new Error('Not signed in.');
+  const { error } = await sb.from('reading_positions').upsert({
+    user_id: session.user.id, book_id: bookId, location, fraction, updated_at: at || new Date().toISOString(),
+  });
+  if (error) throw error;
+}
+
+// open -> { url, kind, size, file_id } (a link valid for an hour); remove -> deletes the file (owner).
+export async function bookFileAction(action, bookId) {
+  const { data, error } = await sb.functions.invoke('book-file', { body: { action, book: bookId } });
+  if (error) throw await fnError(error);
+  return data;
+}
+
+// Store a book's file (owner). Replaces any earlier file for the same book.
+export async function uploadBookFile(bookId, file) {
+  const q = new URLSearchParams({ action: 'upload', book: bookId, name: file.name });
+  const { data, error } = await sb.functions.invoke(`book-file?${q}`, {
+    body: file, headers: { 'Content-Type': 'application/octet-stream' },
+  });
+  if (error) throw await fnError(error);
+  return data;
+}
+
+// Is the signed-in person the owner? (Used by the reader to decide whether it may change the shelf.)
+export async function amOwner() {
+  const { data, error } = await sb.rpc('is_owner');
+  if (error) throw error;
+  return !!data;
+}

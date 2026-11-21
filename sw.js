@@ -6,15 +6,17 @@
 //   Book data, login, uploads, YouTube   -> not touched here. The page keeps its own saved copy of the shelf.
 //
 // Changed this file? Raise VERSION so browsers drop the old saved site files.
-const VERSION = 'v1';
+const VERSION = 'v2';             // v2 (21 November 2026): the reader, Cloudflare addresses, library cache
 const SHELL = `shell-${VERSION}`;
 const IMAGES = 'covers-v1';
 const FONTS = 'fonts-v1';
+const LIBS = 'libs-v1';          // code libraries from cdn.jsdelivr.net (the Supabase library); their addresses carry a version, so they never change
 const MAX_IMAGES = 600;          // oldest saved covers are dropped beyond this
 const SLOW_MS = 4000;            // on a slow connection, show the saved copy after this long
 
+// (Cloudflare answers "index.html" with a redirect to "./", so only "./" is kept: 21 November 2026.)
 const SHELL_FILES = [
-  './', 'index.html', 'css/style.css', 'js/public.js', 'js/core.js', 'js/config.js',
+  './', 'css/style.css', 'js/public.js', 'js/core.js', 'js/config.js',
   'manifest.webmanifest', 'favicon.ico', 'icons/icon-192.png',
 ];
 
@@ -33,8 +35,12 @@ self.addEventListener('activate', (event) => {
 // Site files: network first; fall back to the saved copy when offline, or early when the network is slow.
 async function siteFile(request) {
   const cache = await caches.open(SHELL);
+  // Cloudflare serves "reader.html" at "reader" (and "admin.html" at "admin"), so a page saved under one
+  // name is also found under the other. Other pages fall back to the shelf. (21 November 2026)
+  const path = new URL(request.url).pathname;
   const saved = await cache.match(request, { ignoreSearch: true })
-    || (request.mode === 'navigate' && !/admin\.html$/.test(new URL(request.url).pathname) ? await cache.match('index.html') : undefined);
+    || (request.mode === 'navigate' ? await cache.match(path.endsWith('.html') ? path.replace(/\.html$/, '') : `${path}.html`, { ignoreSearch: true }) : undefined)
+    || (request.mode === 'navigate' && !/(admin|reader)(\.html)?$/.test(path) ? await cache.match('./') : undefined);
   const fresh = fetch(request).then((res) => {
     if (res.ok) cache.put(request, res.clone());
     return res;
@@ -66,6 +72,16 @@ async function image(request) {
   }
 }
 
+// Libraries: saved copy first (a versioned address never changes), so the reader can start offline.
+async function library(request) {
+  const cache = await caches.open(LIBS);
+  const saved = await cache.match(request);
+  if (saved) return saved;
+  const res = await fetch(request);
+  if (res.ok) cache.put(request, res.clone());
+  return res;
+}
+
 // Fonts: saved copy first, refreshed quietly in the background.
 async function font(request) {
   const cache = await caches.open(FONTS);
@@ -84,5 +100,6 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com') { event.respondWith(font(request)); return; }
+  if (url.hostname === 'cdn.jsdelivr.net' && url.pathname.startsWith('/npm/')) { event.respondWith(library(request)); return; }
   if (request.destination === 'image') event.respondWith(image(request));
 });

@@ -1532,3 +1532,13 @@ button.vz-col { cursor: pointer; }
 .gi-state { display: inline-block; margin-top: 3px; font-size: 12px; font-weight: 600; }
 .gi-new { color: var(--owned); } .gi-fill { color: var(--accent); } .gi-have, .gi-missing { color: var(--muted); }
 .gi-prog { margin-top: 10px; }
+
+/* Reader file box in Edit book (21 November 2026) */
+.rf { border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; background: var(--surface); }
+.rf-state { margin: 0 0 8px; }
+.rf-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.rf-acts .btn { min-height: 40px; display: inline-flex; align-items: center; cursor: pointer; }
+/* Read button on a book page */
+.read-slot:empty { display: none; }
+.read-slot { margin: var(--s2) 0 var(--s3); }
+.read-btn { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding-inline: 22px; font-size: 16px; }
