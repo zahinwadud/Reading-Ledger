@@ -218,9 +218,9 @@ async function fnError(error) {
 
 export const sbReady = () => !!sb;
 
-// The function's address name in Supabase. The dashboard named it "smart-handler" when it was made
-// (its display name is book-file); the address cannot be renamed, so it is set here.
-const BOOK_FN = 'smart-handler';
+// The function's address name in Supabase.
+// const BOOK_FN = 'smart-handler';   (the first deployment's address, replaced by a new function named book-file)
+const BOOK_FN = 'book-file';
 
 // One book, fresh from the database (the reader page does not load the whole shelf).
 export async function bookById(id) {
