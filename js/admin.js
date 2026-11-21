@@ -403,6 +403,8 @@ async function onQuickStatus(e) {
       if (book.progress != null || book.progress_mark) Object.assign(patch, { progress: null, progress_mark: null, progress_on: null });
     }
   }
+  // Starting to read (or reread) counts as activity for "Recently updated" (21 November 2026).
+  if ('progress_at' in book && (patch.status === 'reading' || patch.rereading)) patch.progress_at = new Date().toISOString();
   sel.disabled = true;
   try {
     const row = await saveBook(patch, book.id);
@@ -938,6 +940,10 @@ function readFields(audio) {
   const mark = active ? (audio ? $('f-time').value.trim() : $('f-page').value.trim()) || null : null;
   const before = editing || {};
   const changed = progress !== (before.progress ?? null) || mark !== (before.progress_mark ?? null);
+  // The exact time of the latest activity, for "Recently updated" (21 November 2026; needs supabase/activity-time.sql).
+  const wasActive = before.status === 'reading' || (before.status === 'read' && !!before.rereading);
+  const activity = books.length && 'progress_at' in books[0]
+    ? { progress_at: !active ? null : changed || !wasActive ? new Date().toISOString() : (before.progress_at || null) } : {};
   return {
     finished_at,
     reads,
@@ -946,6 +952,7 @@ function readFields(audio) {
     progress_mark: mark,
     progress_on: progress == null && !mark ? null : changed ? today() : (before.progress_on || today()),
     started_at: active ? $('f-started').value || null : null,
+    ...activity,
   };
 }
 

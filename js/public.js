@@ -99,7 +99,9 @@ const SORT_DEFAULT = ['added', 'title', 'author', 'newest', 'oldest'];
 const SORT_READ = ['finished', 'added', 'title', 'author', 'newest', 'oldest'];
 // Currently Reading (added 18 November 2026): latest activity first, the same order as its row on the home page.
 // Activity = the day progress was last updated, or else the day the read started; titles with neither follow, newest added first.
-const activityOf = (b) => String(b.progress_on || b.started_at || '');
+// const activityOf = (b) => String(b.progress_on || b.started_at || '');
+// progress_at (21 November 2026) holds the exact time, so books updated on the same day keep the right order.
+const activityOf = (b) => String(b.progress_at || b.progress_on || b.started_at || '');
 SORTS.updated = ['Recently updated', (a, b) => activityOf(b).localeCompare(activityOf(a)) || byAdded(a, b)];
 const SORT_READING = ['updated', 'added', 'title', 'author', 'newest', 'oldest'];
 const SORT_AUTHOR = ['title', 'newest', 'oldest', 'added'];
@@ -1084,8 +1086,13 @@ function fmtDate(iso) {
 });
 
 // The Read button: only for signed-in readers, only for books with a file (21 November 2026).
-const readBtn = (id) => (readerFiles().has(id)
-  ? `<a class="btn primary read-btn" href="./reader.html#${esc(id)}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 6C9.8 4.5 6.5 4.2 3.5 5v13c3-.8 6.3-.5 8.5 1"/><path d="M12 6c2.2-1.5 5.5-1.8 8.5-1v13c-3-.8-6.3-.5-8.5 1"/><path d="M12 6v13"/></svg>Read</a>` : '');
+// Where you stopped on this device ("Continue · 34%"), with a thin bar along the bottom of the button.
+const readSpot = (id) => { try { const p = JSON.parse(localStorage.getItem(`rl-pos-${id}`) || 'null'); return p && p.fraction > 0 ? Math.round(p.fraction * 100) : 0; } catch (e) { return 0; } };
+const readBtn = (id) => {
+  if (!readerFiles().has(id)) return '';
+  const pct = readSpot(id);
+  return `<a class="btn primary read-btn" href="./reader.html#${esc(id)}"${pct ? ` style="--rp:${pct}%"` : ''}><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 6C9.8 4.5 6.5 4.2 3.5 5v13c3-.8 6.3-.5 8.5 1"/><path d="M12 6c2.2-1.5 5.5-1.8 8.5-1v13c-3-.8-6.3-.5-8.5 1"/><path d="M12 6v13"/></svg>${pct ? `Continue<span class="read-pct">${pct}%</span>` : 'Read'}</a>`;
+};
 refreshReaderFiles().then(() => document.querySelectorAll('[data-read-slot]').forEach((el) => { el.innerHTML = readBtn(el.dataset.readSlot); }));
 
 function detailPage(id) {
@@ -1262,15 +1269,15 @@ function detailPage(id) {
   return `<div class="wrap">
     <div class="detail-top"><a class="backbtn" href="${esc(backHash)}" data-back>${ICON.left}Back to ${esc(backLabel)}</a>${edit}</div>
     <article class="detail bookpage">
-      <div class="detail-side"><button type="button" class="coverzoom" data-zoom aria-label="See the cover full screen">${coverHtml(b, true)}</button></div>
+      <div class="detail-side"><button type="button" class="coverzoom" data-zoom aria-label="See the cover full screen">${coverHtml(b, true)}</button><div class="read-slot read-d" data-read-slot="${esc(b.id)}">${readBtn(b.id)}</div></div>
       <header class="detail-head">
         <h1 class="${lc(b)}">${esc(b.title)}</h1>
         ${authorHtml}
         <p class="meta">${meta}</p>
         <div class="dtags">${statusBadge(b)}${badge(b)}${copyBadges(b)}</div>
-        <div class="read-slot" data-read-slot="${esc(b.id)}">${readBtn(b.id)}</div>
       </header>
       <div class="detail-body">
+        <div class="read-slot read-m" data-read-slot="${esc(b.id)}">${readBtn(b.id)}</div>
         ${progressHtml}${historyHtml}
         ${finishedLine ? `<p class="meta fin">${finishedLine}</p>` : ''}
         ${b.description ? `<p class="desc ${lc(b)}${String(b.description).length > 420 ? ' clamp' : ''}">${esc(String(b.description).replace(/<br\s*\/?>/gi, '\n'))}</p>${String(b.description).length > 420 ? '<button type="button" class="desc-more" data-desc>Read more</button>' : ''}` : ''}
@@ -1419,6 +1426,8 @@ async function load() {
   }
 }
 window.addEventListener('online', () => { if (offline) load(); });
+// Coming back with the Back button (from the reader, say) shows the page as it was: fetch the shelf again.
+window.addEventListener('pageshow', (e) => { if (e.persisted) load(); });
 
 // ---------- events ----------
 // Search icon: click to expand the field, Escape / icon again / click elsewhere (while empty) to close.

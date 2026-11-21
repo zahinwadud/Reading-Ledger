@@ -245,15 +245,37 @@ async function showEpub(id, file, location) {
 }
 
 // Taps inside the page: left third back, right third forward, middle shows or hides the bars.
-function wireDoc(doc) {
-  doc.addEventListener('click', (e) => {
-    if (e.defaultPrevented || e.target.closest('a[href]')) return;
-    if (doc.getSelection && String(doc.getSelection()).trim()) return;   // selecting text
-    const frame = doc.defaultView.frameElement;
-    const x = (frame ? frame.getBoundingClientRect().left : 0) + e.clientX;
-    const r = $('rd-view').getBoundingClientRect();
-    const f = (x - r.left) / r.width;
+// On phones a tap is read from the touch itself: the page-turning code cancels the "click" whenever the
+// finger moves even a little, which made taps on the edges unreliable (21 November 2026).
+function tapAt(doc, clientX) {
+  const frame = doc.defaultView.frameElement;
+  const x = (frame ? frame.getBoundingClientRect().left : 0) + clientX;
+  const r = $('rd-view').getBoundingClientRect();
+  const f = (x - r.left) / r.width;
+  // after the page code has settled the page (it does that one frame after the finger lifts)
+  requestAnimationFrame(() => requestAnimationFrame(() => {
     if (f < 0.3) view.goLeft(); else if (f > 0.7) view.goRight(); else toggleBars();
+  }));
+}
+function wireDoc(doc) {
+  let touch = null, lastTouchTap = 0;
+  const selecting = () => doc.getSelection && String(doc.getSelection()).trim();
+  doc.addEventListener('touchstart', (e) => {
+    const t = e.changedTouches[0];
+    touch = e.touches.length === 1 ? { x: t.screenX, y: t.screenY, cx: t.clientX, at: e.timeStamp, link: !!e.target.closest('a[href]') } : null;
+  }, { passive: true });
+  doc.addEventListener('touchend', (e) => {
+    const s = touch; touch = null;
+    if (!s || s.link || selecting()) return;
+    const t = e.changedTouches[0];
+    if (Math.hypot(t.screenX - s.x, t.screenY - s.y) > 14 || e.timeStamp - s.at > 450) return;   // a swipe or a long press
+    lastTouchTap = Date.now();
+    tapAt(doc, s.cx);
+  }, { passive: true });
+  doc.addEventListener('click', (e) => {
+    if (Date.now() - lastTouchTap < 700) return;            // already handled as a tap
+    if (e.defaultPrevented || e.target.closest('a[href]') || selecting()) return;
+    tapAt(doc, e.clientX);
   });
   doc.addEventListener('keydown', onKey);
 }
@@ -304,6 +326,7 @@ async function flush(id) {
     if (shelfReady && owner && book && readingNow(book) && pct !== lastPct && pct !== Number(book.progress)) {
       lastPct = pct;
       const patch = { progress: pct, progress_mark: null, progress_on: today() };
+      if ('progress_at' in book) patch.progress_at = new Date().toISOString();   // exact time, for "Recently updated"
       await api.patchBook(id, patch); Object.assign(book, patch);
     }
   } catch (e) { pending = pending || p; /* offline: kept on the phone, sent next time */ }
@@ -329,11 +352,27 @@ function ask(text, onYes) {
   };
 }
 function maybeAskStart() {
+  // A finished book opened again: offer to start a reread (the same as "Rereading" in the dashboard).
+  if (owner && book && book.status === 'read' && !book.rereading) {
+    ask(`Start a reread of “${book.title}”?`, async () => {
+      const patch = { rereading: true, started_at: today(), progress: null, progress_mark: null, progress_on: null };
+      if ('progress_at' in book) patch.progress_at = new Date().toISOString();
+      if (!(Array.isArray(book.reads) && book.reads.length)) patch.reads = readsOf(book);   // keep the earlier read
+      await api.patchBook(book.id, patch); Object.assign(book, patch);
+      shelfReady = true; lastPct = null;
+      if (view && view.lastLocation) { pending = { location: view.lastLocation.cfi, fraction: Math.round((view.lastLocation.fraction || 0) * 10000) / 10000, updated_at: new Date().toISOString() }; flush(openId); }
+      toast('Rereading. Your progress now shows on the shelf.');
+    });
+    return;
+  }
   if (!owner || !book || book.status !== 'want') return;
   ask(`Mark “${book.title}” as ${STATUS.reading}?`, async () => {
     const patch = { status: 'reading' };
+    if ('progress_at' in book) patch.progress_at = new Date().toISOString();
     if (!book.started_at) patch.started_at = today();
     await api.patchBook(book.id, patch); Object.assign(book, patch);
+    shelfReady = true; lastPct = null;
+    if (view && view.lastLocation) { pending = { location: view.lastLocation.cfi, fraction: Math.round((view.lastLocation.fraction || 0) * 10000) / 10000, updated_at: new Date().toISOString() }; flush(openId); }
     toast(`Now ${STATUS.reading}.`);
   });
 }

@@ -1539,6 +1539,12 @@ button.vz-col { cursor: pointer; }
 .rf-acts { display: flex; flex-wrap: wrap; gap: 8px; }
 .rf-acts .btn { min-height: 40px; display: inline-flex; align-items: center; cursor: pointer; }
 /* Read button on a book page */
+/* Desktop and tablet: under the cover, as wide as it. Phone: a full-width button right under the cover and title. */
 .read-slot:empty { display: none; }
-.read-slot { margin: var(--s2) 0 var(--s3); }
-.read-btn { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding-inline: 22px; font-size: 16px; }
+.read-slot.read-d { margin-top: var(--s2); }
+.read-slot.read-m { display: none; margin-bottom: var(--s3); }
+@media (max-width: 700px) { .read-slot.read-d { display: none; } .read-slot.read-m:not(:empty) { display: block; } }
+.read-btn { position: relative; overflow: hidden; display: flex; width: 100%; box-sizing: border-box; align-items: center; justify-content: center; gap: 8px; min-height: 48px; font-size: 16px; font-weight: 600; white-space: nowrap; }
+.read-btn .read-pct { opacity: .85; font-weight: 500; }
+.read-btn .read-pct::before { content: "·"; margin: 0 6px; }
+.read-btn[style*="--rp"]::after { content: ""; position: absolute; left: 0; bottom: 0; height: 4px; width: var(--rp); background: currentColor; opacity: .55; }
