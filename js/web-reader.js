@@ -190,8 +190,18 @@ export function readPastedText(raw) {
     const genreAt = L.findIndex((l, i) => i > ratingAt && /^Genres/.test(l));
     const end = genreAt > 0 ? genreAt : L.findIndex((l, i) => i > ratingAt && /^\d+ pages/.test(l));
     out.description = lines.slice(lines.indexOf(L[ratingAt + 1]) + 1, end > 0 ? lines.indexOf(L[end]) : undefined).join('\n').replace(/\n{3,}/g, '\n\n').trim();
-    if (genreAt > 0) out.genres = L[genreAt].replace(/^Genres/, '').replace(/\.{3}\s*show all$|…\s*show all$|show all$/i, '').trim()
+    // Genres come either on one line ("GenresThrillerMystery...show all") or, as Goodreads copies now
+    // (21 November 2026), "Genres" alone with one genre per line below it.
+    if (genreAt > 0 && L[genreAt] !== 'Genres') out.genres = L[genreAt].replace(/^Genres/, '').replace(/\.{3}\s*show all$|…\s*show all$|show all$/i, '').trim()
       .split(/(?<=[a-z])(?=[A-Z])/).map((g) => g.trim()).filter(Boolean);
+    else if (genreAt > 0) {
+      for (let i = genreAt + 1; i < L.length && out.genres.length < 20; i += 1) {
+        const g = L[i];
+        if (/^(\.{3}|…)?\s*(show all|more|show more)$/i.test(g)) break;
+        if (/^\d+ pages|^First published|^Published|^Book details|^Kindle Edition|^Paperback|^Hardcover/i.test(g) || g.length > 40 || !/^[A-Za-z][A-Za-z0-9 '&,.-]*$/.test(g)) break;
+        out.genres.push(g);
+      }
+    }
     const pg = L.find((l) => /^\d+ pages/.test(l));
     if (pg) { const m = pg.match(/^(\d+) pages(?:,\s*(.+))?$/); out.pages = Number(m[1]); out.format = m[2] || ''; }
     const fp = L.find((l) => /^First published /i.test(l));
