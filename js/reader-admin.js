@@ -7,6 +7,7 @@ const $ = (id) => document.getElementById(id);
 const mb = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 const MAX = 50 * 1048576;     // the Edge Function reads the whole file at once; bigger files come later
 let book = null, toast = () => {}, ticket = 0;
+let pending = null;            // a file picked while adding a new book: uploaded right after the book is saved
 
 // Books that have a file, remembered for the public site's Read button (same list the reader keeps).
 function remember(id, has) {
@@ -21,8 +22,13 @@ function draw(file, note) {
   const box = $('g-file');
   if (!box) return;
   box.hidden = false;
-  if (!book) { $('rf-state').textContent = 'Save the book first, then add its file here.'; $('rf-acts').hidden = true; return; }
   $('rf-acts').hidden = false;
+  if (!book) {   // adding a new book: the file is kept and uploaded after "Save book"
+    $('rf-state').innerHTML = pending ? `Will be added when you save the book: <b>${esc(pending.name)}</b> (${mb(pending.size)})` : 'No file yet. Pick one now; it is uploaded when you save the book.';
+    $('rf-pick').textContent = pending ? 'Choose another file' : 'Add a file';
+    $('rf-open').hidden = true; $('rf-remove').hidden = true;
+    return;
+  }
   $('rf-state').innerHTML = note || (file
     ? `<b>${esc(file.kind.toUpperCase())}</b> · ${mb(file.size)} · added ${esc(String(file.uploaded_at).slice(0, 10))}${file.name ? ` · <span class="hint">${esc(file.name)}</span>` : ''}`
     : 'No file yet. Add an EPUB (best on phones), a PDF or a CBZ.');
@@ -32,7 +38,7 @@ function draw(file, note) {
 }
 
 export async function showFileBox(b, showToast) {
-  book = b || null; toast = showToast || toast;
+  book = b || null; toast = showToast || toast; pending = null;
   const my = ++ticket;
   if (!book) return draw(null);
   draw(null, 'Checking…');
@@ -44,13 +50,24 @@ export async function showFileBox(b, showToast) {
   }
 }
 
+// After "Save book" on a new book: upload the file picked in the form, if any.
+export async function fileAfterSave(row) {
+  if (!pending || !row || !row.id) return;
+  const file = pending; pending = null;
+  book = row;
+  toast(`Uploading ${file.name}…`);
+  try { await uploadBookFile(row.id, file); remember(row.id, true); toast(`File added to “${row.title}”.`); }
+  catch (err) { toast(`The book is saved, but the file upload failed: ${err.message}. Open Edit to try again.`, true); }
+}
+
 export function initFileBox() {
   if (!$('g-file')) return;
   $('rf-input').addEventListener('change', async (e) => {
     const file = e.target.files[0]; e.target.value = '';
-    if (!file || !book) return;
+    if (!file) return;
     if (!/\.(epub|pdf|cbz)$/i.test(file.name)) { toast('Only .epub, .pdf and .cbz files.', true); return; }
     if (file.size > MAX) { toast(`This file is ${mb(file.size)}. Files up to ${mb(MAX)} for now.`, true); return; }
+    if (!book) { pending = file; draw(null); return; }
     const my = ++ticket;
     draw(null, `Uploading ${esc(file.name)} (${mb(file.size)})…`); $('rf-acts').hidden = true;
     try {

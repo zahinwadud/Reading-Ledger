@@ -218,6 +218,10 @@ async function fnError(error) {
 
 export const sbReady = () => !!sb;
 
+// The function's address name in Supabase. The dashboard named it "smart-handler" when it was made
+// (its display name is book-file); the address cannot be renamed, so it is set here.
+const BOOK_FN = 'smart-handler';
+
 // One book, fresh from the database (the reader page does not load the whole shelf).
 export async function bookById(id) {
   const { data, error } = await sb.from('books').select('*').eq('id', id).maybeSingle();
@@ -265,7 +269,7 @@ export async function savePosition(bookId, location, fraction, at) {
 
 // open -> { url, kind, size, file_id } (a link valid for an hour); remove -> deletes the file (owner).
 export async function bookFileAction(action, bookId) {
-  const { data, error } = await sb.functions.invoke('book-file', { body: { action, book: bookId } });
+  const { data, error } = await sb.functions.invoke(BOOK_FN, { body: { action, book: bookId } });
   if (error) throw await fnError(error);
   return data;
 }
@@ -273,7 +277,7 @@ export async function bookFileAction(action, bookId) {
 // Store a book's file (owner). Replaces any earlier file for the same book.
 export async function uploadBookFile(bookId, file) {
   const q = new URLSearchParams({ action: 'upload', book: bookId, name: file.name });
-  const { data, error } = await sb.functions.invoke(`book-file?${q}`, {
+  const { data, error } = await sb.functions.invoke(`${BOOK_FN}?${q}`, {
     body: file, headers: { 'Content-Type': 'application/octet-stream' },
   });
   if (error) throw await fnError(error);

@@ -7,7 +7,7 @@ import {
 import { initImport } from './import.js';
 import { initTools, openTool } from './tools.js';
 import { initGoodreadsPage, gpReset, gpExtra, gpAfterSave } from './goodreads-page.js';   // Fill from a saved Goodreads page (19 November 2026)
-import { initFileBox, showFileBox } from './reader-admin.js';   // Reader file box (21 November 2026)
+import { initFileBox, showFileBox, fileAfterSave } from './reader-admin.js';   // Reader file box (21 November 2026)
 
 const $ = (id) => document.getElementById(id);
 
@@ -1005,8 +1005,10 @@ $('book-form').addEventListener('submit', async (e) => {
     else if (removeFlag) { data.cover_path = null; data.cover_url = null; }
     else data.cover_path = oldPath;
     // await saveBook(data, editing ? editing.id : null);
-    await saveBook(data, editing ? editing.id : null);
+    // await saveBook(data, editing ? editing.id : null);   (21 November 2026: the saved row is kept for the reader file)
+    const savedRow = await saveBook(data, editing ? editing.id : null);
     if (oldPath && (uploaded || removeFlag)) await removeCover(oldPath); // tidy the replaced file
+    if (!editing) await fileAfterSave(savedRow);                          // a reader file picked while adding the book
     try { await gpAfterSave(); } catch (err2) { handleErr(err2); }       // books inside this one join its story arc
     if (goBackToBook()) return;            // came from the public site's Edit button: back to that book
     dlg.close();
